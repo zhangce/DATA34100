@@ -1,0 +1,818 @@
+# Chapter: High-Performance Matrix Multiplication on Modern Hardware
+
+## 1. Introduction
+
+Matrix multiplication (GEMM - General Matrix Multiply) is one of the most fundamental operations in scientific computing, machine learning, and data systems. The operation C = A × B, where A is M×K, B is K×N, and C is M×N, requires O(M×N×K) floating-point operations. For square matrices of size N, this means 2N³ FLOPs (N³ multiplications and N³ additions).
+
+The performance of GEMM is critical because:
+- Deep learning inference and training are dominated by matrix multiplications
+- Scientific simulations rely heavily on linear algebra
+- Database operations (joins, aggregations) can be expressed as matrix operations
+
+Modern processors can theoretically achieve thousands of GFLOPS (billions of floating-point operations per second), but naive implementations achieve only a small fraction of this peak. This chapter explores how to close this gap through systematic optimization.
+
+### Hands-On Code
+
+This chapter is accompanied by `gemm_progressive.c`, which contains implementations of each optimization stage discussed. You can compile and run it to see the performance progression yourself:
+
+```bash
+# Compile
+clang -O3 -mcpu=apple-m1 -o gemm_progressive gemm_progressive.c -framework Accelerate
+
+# Run (single-threaded for fair comparison)
+VECLIB_MAXIMUM_THREADS=1 ./gemm_progressive
+```
+
+The implementations and their corresponding sections:
+
+| Function | Section | Description |
+|----------|---------|-------------|
+| `gemm_naive()` | 2.1 | Triple nested loop (baseline) |
+| `gemm_blocked()` | 4, 6 | Goto blocking + AMX micro-kernel |
+| `gemm_packed_a()` | 5 | + A matrix packing |
+| `gemm_packed_ab()` | 7 | + On-the-fly B packing |
+| `gemm_tuned()` | 10 | + Optimal parameter tuning |
+| `gemm_lazy()` | 8 | + Lazy A packing |
+
+## 2. The Memory Hierarchy Challenge
+
+### 2.1 The Problem
+
+Consider a naive GEMM implementation (see `gemm_naive()` in `gemm_progressive.c`):
+
+```c
+for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
+        float sum = 0;
+        for (int k = 0; k < N; k++) {
+            sum += A[i * N + k] * B[k * N + j];
+        }
+        C[i * N + j] = sum;
+    }
+}
+```
+
+For a 1024×1024 matrix multiplication:
+- Total FLOPs: 2 × 1024³ ≈ 2.15 billion
+- Data movement: Each element of A and B is loaded N times
+- Memory bandwidth required: ~8 TB/s to match a 2000 GFLOPS processor
+
+Modern DRAM provides only ~100 GB/s bandwidth. This 80× gap between compute capability and memory bandwidth is the fundamental challenge.
+
+### 2.2 The Solution: Data Reuse Through Blocking
+
+The key insight is that we don't need to load data from main memory for every operation. Modern processors have a cache hierarchy:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     Main Memory (DRAM)                   │
+│                   ~100 GB/s,                                       │
+└─────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────┐
+│                    L2 Cache (~32MB)                     │
+│                                                                       │
+└─────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────┐
+│                    L1 Cache (~192+128KB)             │
+│                                                                          │
+└─────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────┐
+│                      Registers                                     │
+│                 Unlimited bandwidth, 1 cycle             │
+└─────────────────────────────────────────────────────────┘
+```
+
+By organizing computation to reuse data while it resides in faster cache levels, we can achieve near-peak performance.
+
+## 3. Apple AMX: A Matrix Coprocessor
+
+### 3.1 Overview
+
+Apple's M-series chips include an undocumented matrix coprocessor called AMX (Apple Matrix eXtensions). Unlike traditional SIMD units that process vectors, AMX performs matrix operations directly.
+
+### 3.2 Register Architecture
+
+AMX has three register files:
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  X Registers: 8 registers × 64 bytes = 512 bytes total     │
+│  Each X register holds 16 floats (for FP32)                │
+│  Used for: B matrix rows (horizontal vectors)              │
+└────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────┐
+│  Y Registers: 8 registers × 64 bytes = 512 bytes total     │
+│  Each Y register holds 16 floats (for FP32)                │
+│  Used for: A matrix columns (vertical vectors)             │
+└────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────┐
+│  Z Registers: 64 rows × 64 bytes = 4KB total               │
+│  Organized as z[row][col] for accumulation                 │
+│  Used for: C matrix tile (accumulator)                     │
+└────────────────────────────────────────────────────────────┘
+```
+
+### 3.3 The FMA32 Instruction
+
+The key instruction is FMA32 (Fused Multiply-Add for 32-bit floats), which computes an **outer product**:
+
+```
+FMA32 Operation:
+    z[j][i] += x[i] * y[j]    for all i,j in [0,16)
+
+This single instruction performs:
+    - 16 × 16 = 256 multiplications
+    - 16 × 16 = 256 additions
+    - Total: 512 FLOPs per instruction
+```
+
+Visually:
+
+```
+        x[0] x[1] x[2] ... x[15]  (from X register)
+        ↓    ↓    ↓        ↓
+y[0] →  +=   +=   +=  ...  +=     → z[0][0..15]
+y[1] →  +=   +=   +=  ...  +=     → z[1][0..15]
+y[2] →  +=   +=   +=  ...  +=     → z[2][0..15]
+ ⋮       ⋮    ⋮    ⋮        ⋮
+y[15]→  +=   +=   +=  ...  +=     → z[15][0..15]
+
+(from Y register)          (accumulates in Z register)
+```
+
+### 3.4 Load and Store Operations
+
+```
+LDX: Load 64 bytes from memory into X register
+LDY: Load 64 bytes from memory into Y register
+LDZ: Load 64 bytes from memory into Z register row
+STZ: Store 64 bytes from Z register row to memory
+```
+
+### 3.5 Building a 32×32 Tile from 16×16 Operations
+
+Since FMA32 operates on 16×16 tiles, we compose four operations to compute a 32×32 output tile:
+
+```
+                        B (32 columns)
+                 ┌──────────┬──────────┐
+                 │  B[0:16] │ B[16:32] │
+                 └──────────┴──────────┘
+                      ↓          ↓
+    A           ┌──────────┬──────────┐
+ (32 rows)      │  z_row=0 │  z_row=1 │  ← A[0:16] × B
+    │           ├──────────┼──────────┤
+    ↓           │  z_row=2 │  z_row=3 │  ← A[16:32] × B
+                └──────────┴──────────┘
+                     C (32×32 output)
+
+Four FMA32 calls with different z_row and offsets:
+    FMA32(z_row=0, x_offset=0,  y_offset=0)   // top-left
+    FMA32(z_row=1, x_offset=64, y_offset=0)   // top-right
+    FMA32(z_row=2, x_offset=0,  y_offset=64)  // bottom-left
+    FMA32(z_row=3, x_offset=64, y_offset=64)  // bottom-right
+```
+
+## 4. The Goto Algorithm: 6-Level Blocking
+
+> **Code Reference**: See `gemm_blocked()` in `gemm_progressive.c` for the basic Goto-style implementation with AMX micro-kernel (without packing). This achieves ~42 GFLOPS - a 21x improvement over naive, purely from cache blocking and AMX hardware.
+
+### 4.1 The Blocking Hierarchy
+
+The Goto algorithm (Goto & Van de Geijn, 2008) organizes GEMM into six nested loops, each targeting a specific level of the memory hierarchy:
+
+```
+Level  Loop   Block Size   Target Cache    Purpose
+─────────────────────────────────────────────────────────────
+L1     jc     NC          L3/Memory       Panel of B columns
+L2     pc     KC          L2              Reduction dimension
+L3     ic     MC          L2              Panel of A rows
+L4     jr     NR          Registers       Micro-panel of B
+L5     ir     MR          Registers       Micro-panel of A
+L6     k      1           Registers       Accumulation
+```
+
+### 4.2 Visual Representation
+
+```
+Matrix A (M×K)              Matrix B (K×N)              Matrix C (M×N)
+┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐
+│                 │         │                 │         │                 │
+│    ┌───────┐    │         │    ┌───────────┐│         │    ┌───────┐    │
+│    │ MC×KC │    │    ×    │    │  KC×NC    ││    =    │    │ MC×NC │    │
+│    │   Ã   │    │         │    │    B̃     ││         │    │       │    │
+│    └───────┘    │         │    └───────────┘│         │    └───────┘    │
+│                 │         │                 │         │                 │
+└─────────────────┘         └─────────────────┘         └─────────────────┘
+
+Within the MC×NC block of C:
+┌─────────────────────────────────────────┐
+│  ┌────┐ ┌────┐ ┌────┐     ┌────┐       │
+│  │MR× │ │    │ │    │ ... │    │       │
+│  │ NR │ │    │ │    │     │    │       │
+│  └────┘ └────┘ └────┘     └────┘       │
+│  ┌────┐ ┌────┐                          │
+│  │    │ │    │  ...        ...         │
+│  └────┘ └────┘                          │
+│    ⋮                                    │
+└─────────────────────────────────────────┘
+Each small tile is MR×NR, computed by the micro-kernel
+```
+
+### 4.3 Loop Structure
+
+```
+for jc = 0 to N-1 step NC:           // L1: Iterate over B columns
+    for pc = 0 to K-1 step KC:       // L2: Iterate over K dimension
+        Pack B[pc:pc+KC, jc:jc+NC] → B̃
+
+        for ic = 0 to M-1 step MC:   // L3: Iterate over A rows
+            Pack A[ic:ic+MC, pc:pc+KC] → Ã
+
+            for jr = 0 to NC-1 step NR:     // L4: B micro-panels
+                for ir = 0 to MC-1 step MR: // L5: A micro-panels
+
+                    // L6: Micro-kernel
+                    // Compute C[ic+ir : ic+ir+MR, jc+jr : jc+jr+NR]
+                    //       += Ã[ir:ir+MR, :] × B̃[:, jr:jr+NR]
+
+                    micro_kernel(Ã + ir*KC, B̃ + jr*KC,
+                                 C + (ic+ir)*N + (jc+jr))
+```
+
+### 4.4 Why This Loop Order?
+
+The loop order is carefully chosen to maximize data reuse:
+
+1. **B̃ (KC×NC) stays in L2**: Packed once per (jc, pc), reused across all ic iterations
+2. **Ã (MC×KC) stays in L2**: Packed once per (jc, pc, ic), reused across all jr iterations
+3. **C tile (MR×NR) stays in registers**: Accumulated across all k iterations
+
+```
+Data Reuse Analysis:
+─────────────────────────────────────────────────────────────
+                    Times      Times       Reuse
+Data Block          Loaded     Used        Factor
+─────────────────────────────────────────────────────────────
+B̃ (KC×NC)          N/NC       (M/MC)      M/MC times
+Ã (MC×KC)          M/MC       (NC/NR)     NC/NR times
+C tile (MR×NR)     1          KC          KC times (in registers)
+─────────────────────────────────────────────────────────────
+```
+
+## 5. Packing: Memory Layout Optimization
+
+> **Code Reference**: See `gemm_packed_a()` in `gemm_progressive.c` for A-packing implementation. This achieves ~723 GFLOPS - a 17x improvement over the blocked version, demonstrating the critical importance of memory layout.
+
+### 5.1 Why Packing is Necessary
+
+Original matrix layout (row-major):
+```
+A[i,k] is at address: base_A + i*K + k
+
+When loading A[0:MR, k] (a column of MR elements):
+    A[0,k] → base + 0*K + k
+    A[1,k] → base + 1*K + k    (stride = K elements apart)
+    A[2,k] → base + 2*K + k
+    ...
+
+This strided access pattern:
+- Wastes cache line loads (load 64 bytes, use 4)
+- Prevents efficient SIMD/AMX loads
+- Causes TLB misses for large K
+```
+
+### 5.2 Packed Layout for A
+
+We pack A into a contiguous format optimized for the micro-kernel:
+
+```
+Original A (MC×KC):              Packed Ã:
+┌─────────────────────┐         ┌─────────────────────────────────┐
+│ a00 a01 a02 ... a0K │         │ Slice 0: a00 a10 a20 ... a(MR-1)0│
+│ a10 a11 a12 ... a1K │         │          a01 a11 a21 ... a(MR-1)1│
+│ a20 a21 a22 ... a2K │   →     │          ...                     │
+│ ...                 │         │          a0K a1K a2K ... a(MR-1)K│
+│ a(MC-1)0 ...        │         │ Slice 1: next MR rows, same fmt  │
+└─────────────────────┘         │ ...                              │
+                                └─────────────────────────────────┘
+
+Packed layout: Ã[slice][k][i] where:
+    - slice = row / MR
+    - k = column index (0 to KC-1)
+    - i = row within slice (0 to MR-1)
+```
+
+This transposed, blocked layout means:
+- Loading column k of a slice is contiguous (MR consecutive floats)
+- Perfect for AMX LDY instruction (loads 16 consecutive floats)
+- No wasted bandwidth
+
+### 5.3 Packed Layout for B
+
+Similarly, B is packed for efficient row access:
+
+```
+Original B (KC×NC):              Packed B̃:
+┌─────────────────────┐         ┌─────────────────────────────────┐
+│ b00 b01 b02 ... b0N │         │ Slice 0: b00 b01 b02 ... b0(NR-1)│
+│ b10 b11 b12 ... b1N │         │          b10 b11 b12 ... b1(NR-1)│
+│ ...                 │   →     │          ...                     │
+│ bK0 bK1 bK2 ... bKN │         │          bK0 bK1 bK2 ... bK(NR-1)│
+└─────────────────────┘         │ Slice 1: next NR columns         │
+                                └─────────────────────────────────┘
+
+Packed layout: B̃[slice][k][j] where:
+    - slice = col / NR
+    - k = row index (0 to KC-1)
+    - j = column within slice (0 to NR-1)
+```
+
+### 5.4 Packing Implementation with NEON
+
+For efficiency, we pack using SIMD (NEON) 4×4 transpose operations:
+
+```
+4×4 Transpose Operation:
+
+Input (4 rows from A):          Output (4 columns for Ã):
+┌─────────────────┐             ┌─────────────────┐
+│ r0: a b c d     │             │ c0: a e i m     │
+│ r1: e f g h     │     →       │ c1: b f j n     │
+│ r2: i j k l     │             │ c2: c g k o     │
+│ r3: m n o p     │             │ c3: d h l p     │
+└─────────────────┘             └─────────────────┘
+
+NEON implementation:
+    1. Load 4 float32x4 vectors (r0, r1, r2, r3)
+    2. Transpose pairs: trn(r0,r1), trn(r2,r3)
+    3. Interleave halves to get columns
+    4. Store 4 consecutive float32x4 vectors
+```
+
+## 6. The Micro-Kernel
+
+### 6.1 Structure
+
+The micro-kernel is the innermost computation unit, computing:
+```
+C[MR×NR] += A[MR×KC] × B[KC×NR]
+```
+
+For our 32×32 micro-kernel with KC iterations:
+
+```
+micro_kernel(A_packed, B_packed, C_tile):
+    // Load C into Z registers (if not first K block)
+    if not first_k:
+        for j in 0..31:
+            LDZ(C_tile + j*ldc, z_row_for_j)
+
+    // Main computation loop
+    for k in 0 to KC-1:
+        LDY(A_packed + k*MR)      // Load 32 floats from A column k
+        LDX(B_packed + k*NR)      // Load 32 floats from B row k
+
+        // Four outer products for 32×32 tile
+        FMA32(z_row=0, x_off=0,  y_off=0)   // top-left 16×16
+        FMA32(z_row=1, x_off=64, y_off=0)   // top-right 16×16
+        FMA32(z_row=2, x_off=0,  y_off=64)  // bottom-left 16×16
+        FMA32(z_row=3, x_off=64, y_off=64)  // bottom-right 16×16
+
+    // Store Z back to C
+    for j in 0..31:
+        STZ(C_tile + j*ldc, z_row_for_j)
+```
+
+### 6.2 Arithmetic Intensity
+
+The micro-kernel's efficiency comes from its high arithmetic intensity:
+
+```
+Per KC iterations:
+    - Loads: MR*KC + NR*KC = KC*(MR+NR) floats
+    - Stores: MR*NR floats (once at end)
+    - FLOPs: 2*MR*NR*KC
+
+Arithmetic Intensity = FLOPs / Memory Traffic
+                    = 2*MR*NR*KC / (4*(KC*(MR+NR) + MR*NR))
+
+For MR=NR=32, KC=1024:
+    = 2*32*32*1024 / (4*(1024*64 + 1024))
+    = 2,097,152 / 266,240
+    ≈ 7.9 FLOPs/byte
+
+This exceeds the machine balance (~10 FLOPs/byte for L2),
+meaning we are compute-bound, not memory-bound!
+```
+
+## 7. On-the-Fly Packing for B
+
+> **Code Reference**: See `gemm_packed_ab()` in `gemm_progressive.c`. This fuses B packing into the micro-kernel, achieving ~1065 GFLOPS - a 1.5x improvement over separate A packing.
+
+### 7.1 The Insight
+
+Instead of packing B in a separate pass, we can pack it during the first micro-kernel call for each B slice. The AMX already loads B into X registers - we simply store X to the packed buffer before computing.
+
+### 7.2 Implementation
+
+```
+micro_kernel_with_B_packing(A_packed, B_src, B_packed, C_tile, pack_B):
+    for k in 0 to KC-1:
+        LDY(A_packed + k*MR)           // Load A column
+
+        if pack_B:
+            LDX(B_src + k*ldb)         // Load B row (strided)
+            STX(B_packed + k*NR)       // Store to packed buffer
+        else:
+            LDX(B_packed + k*NR)       // Load from packed buffer
+
+        FMA32(...)  // Four outer products
+```
+
+### 7.3 Benefits
+
+1. **Eliminates separate packing pass**: B packing is fused with computation
+2. **Better cache utilization**: Packed data is immediately hot in cache
+3. **Reduced memory traffic**: B is read from DRAM only once
+
+## 8. Lazy Packing for A
+
+> **Code Reference**: See `gemm_lazy()` in `gemm_progressive.c`. This defers A packing to just-in-time, achieving ~1491 GFLOPS - matching or exceeding Apple's Accelerate framework.
+
+### 8.1 Motivation
+
+Traditional approach packs the entire A panel (MC×KC) before computation:
+```
+pack_A_panel(A, A_packed, ic, pc)  // Packs all MC×KC elements
+for jc ...
+    for ir ...
+        micro_kernel(A_packed[ir], ...)
+```
+
+This means:
+- A_packed fills cache before any computation
+- By time we use later slices, earlier slices may be evicted
+- No overlap between packing and compute
+
+### 8.2 Lazy Packing Strategy
+
+Instead, pack each MR×KC slice just before first use:
+
+```
+for jc = 0 to N-1 step NC:
+    for ir = 0 to MC-1 step MR:
+        if jc == 0:  // First jc iteration
+            pack_A_slice(A, A_packed[ir], ic+ir, pc)  // Pack just this slice
+
+        for jr = 0 to NC-1 step NR:
+            micro_kernel(A_packed[ir], ...)
+```
+
+### 8.3 Benefits
+
+1. **Better cache locality**: Each slice is hot when first used
+2. **Natural prefetching**: Packing brings data into cache just before compute
+3. **Potential ILP**: Packing one slice can overlap with computing another
+
+```
+Timeline comparison:
+
+Traditional:
+    [pack all A slices]──────────[compute all tiles]──────────
+
+Lazy:
+    [pack slice 0][compute 0][pack slice 1][compute 1]...
+         ↑                         ↑
+    Data hot in cache         Data hot in cache
+```
+
+## 9. Double Buffering and Instruction-Level Parallelism
+
+### 9.1 The Opportunity
+
+AMX instructions are dispatched to a coprocessor. After issuing AMX operations, the CPU can perform other work while AMX computes. We can exploit this to overlap packing with computation.
+
+### 9.2 Double Buffer Structure
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    A_buffer[0]                               │
+│                      MC × KC                                 │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                    A_buffer[1]                               │
+│                      MC × KC                                 │
+└─────────────────────────────────────────────────────────────┘
+
+Iteration 0: Compute with buffer[0], pack into buffer[1]
+Iteration 1: Compute with buffer[1], pack into buffer[0]
+...
+```
+
+### 9.3 Interleaved Execution
+
+```
+for ic = 0 to M-1 step MC:
+    cur = ic % 2
+    next = 1 - cur
+
+    // Compute with current buffer
+    for jc, ir, jr:
+        micro_kernel(A_buffer[cur][ir], B, C)
+
+        // While AMX computes, pack next panel using CPU/NEON
+        if need_next_panel and slices_remaining:
+            pack_A_slice(A, A_buffer[next], next_ic + slice_idx*MR, pc)
+            slice_idx++
+```
+
+### 9.4 Hardware Considerations
+
+On Apple Silicon, AMX and NEON share the same CPU core, so true parallelism is limited. However, interleaving still helps by:
+- Keeping the AMX pipeline fed
+- Improving cache utilization
+- Reducing idle time during memory stalls
+
+## 10. Parameter Tuning
+
+> **Code Reference**: See `gemm_tuned()` in `gemm_progressive.c` which uses the optimal parameters discovered through systematic tuning. Compare with `gemm_packed_ab()` which uses suboptimal defaults - the difference is ~1.4x performance.
+
+### 10.1 The Parameters
+
+```
+MC: Panel height for A (rows processed per ic iteration)
+KC: Panel width (reduction dimension block size)
+NC: Panel width for B (columns processed per jc iteration)
+MR: Micro-kernel rows (must match AMX tile size)
+NR: Micro-kernel columns (must match AMX tile size)
+```
+
+### 10.2 Constraints
+
+```
+Hardware constraints:
+    MR, NR: Fixed by AMX architecture (16 or 32)
+
+Cache constraints:
+    MC × KC × 4 bytes ≤ L2 size (for A panel)
+    KC × NC × 4 bytes ≤ L2 size (for B panel)
+    MC × KC + KC × NC ≤ L2 size (total working set)
+
+Divisibility constraints:
+    M % MC == 0, K % KC == 0, N % NC == 0
+    MC % MR == 0, NC % NR == 0
+```
+
+### 10.3 Trade-offs
+
+```
+Larger KC:
+    + Fewer packing operations (pack A once per ic,pc)
+    + Better arithmetic intensity in micro-kernel
+    - Larger working set, may exceed cache
+
+Smaller MC:
+    + Smaller A panel, fits easily in cache
+    + More ic iterations = better B reuse
+    - More packing operations
+
+Larger NC:
+    + Better B panel reuse across ir iterations
+    - Larger B panel may exceed cache
+```
+
+### 10.4 Tuning Methodology
+
+Systematic sweep over parameter space:
+
+```
+for MC in [64, 128, 256, 512, 1024]:
+    for KC in [128, 256, 512, 1024]:
+        for NC in [64, 128, 256, 512, 1024]:
+            if valid(MC, KC, NC):
+                time = benchmark(MC, KC, NC)
+                if time < best_time:
+                    best = (MC, KC, NC)
+```
+
+For 1024×1024 matrices on Apple M1:
+- **Optimal: MC=256, KC=1024, NC=256**
+- Total packed size: 2MB (fits in 12MB L2)
+- Single pc iteration (KC=N) minimizes A packing
+
+## 11. Putting It All Together
+
+### 11.1 Final Algorithm
+
+```
+GEMM_Optimized(A, B, C, M, N, K):
+    Allocate A_packed[MC × KC]
+    Allocate B_packed[KC × NC]
+
+    AMX_SET()  // Enable AMX coprocessor
+
+    for ic = 0 to M-1 step MC:
+        for pc = 0 to K-1 step KC:
+            first_k = (pc == 0)
+
+            for jc = 0 to N-1 step NC:
+                for ir = 0 to MC-1 step MR:
+                    first_ir = (ir == 0)
+
+                    // Lazy pack A slice on first jc
+                    if jc == 0:
+                        pack_A_slice(A, A_packed[ir], ic+ir, pc)
+
+                    for jr = 0 to NC-1 step NR:
+                        // On-the-fly B packing on first ir
+                        pack_B = first_ir
+
+                        micro_kernel_32x32(
+                            A_packed[ir],
+                            B + pc*ldb + jc + jr,  // B source
+                            B_packed[jr],          // B packed destination
+                            C + (ic+ir)*ldc + jc + jr,
+                            first_k,
+                            pack_B
+                        )
+
+    AMX_CLR()  // Disable AMX
+```
+
+### 11.2 Micro-Kernel Detail
+
+```
+micro_kernel_32x32(A, B_src, B_dst, C, first_k, pack_B):
+    if not first_k:
+        // Load existing C values into Z registers
+        for j = 0 to 31:
+            LDZ(C + j*ldc → z[j])
+
+    for k = 0 to KC-1:
+        // Load A column (32 floats, 2 loads of 16)
+        LDY_multiple(A + k*32 → Y[0:1])
+
+        if pack_B:
+            // Load B row from strided source
+            LDX_multiple(B_src + k*ldb → X[0:1])
+            // Store to packed buffer
+            STX(X[0] → B_dst + k*32)
+            STX(X[1] → B_dst + k*32 + 16)
+        else:
+            // Load from packed buffer
+            LDX_multiple(B_dst + k*32 → X[0:1])
+
+        // Four 16×16 outer products
+        if first_k and k == 0:
+            FMA32_skip_z(z_row=0, x_off=0,  y_off=0)
+            FMA32_skip_z(z_row=1, x_off=64, y_off=0)
+            FMA32_skip_z(z_row=2, x_off=0,  y_off=64)
+            FMA32_skip_z(z_row=3, x_off=64, y_off=64)
+        else:
+            FMA32(z_row=0, x_off=0,  y_off=0)
+            FMA32(z_row=1, x_off=64, y_off=0)
+            FMA32(z_row=2, x_off=0,  y_off=64)
+            FMA32(z_row=3, x_off=64, y_off=64)
+
+    // Store results back to C
+    for j = 0 to 31:
+        STZ(z[j] → C + j*ldc)
+```
+
+## 12. Performance Analysis
+
+### 12.1 Theoretical Peak
+
+```
+Apple M1 AMX (estimated):
+    - Clock: ~3.2 GHz
+    - FMA32 throughput: ~1 per cycle
+    - FLOPs per FMA32: 512 (16×16×2)
+    - Single-core peak: 3.2 × 512 = 1,638 GFLOPS
+```
+
+### 12.2 Achieved Performance
+
+Run `gemm_progressive.c` to see these results on your machine. Typical output:
+
+```
+╔══════════════════════════════════════════════════════════════════╗
+║ Stage  Implementation         GFLOPS   % Peak   vs Accelerate   ║
+╠══════════════════════════════════════════════════════════════════╣
+║   -    Accelerate (ref)         1377     84%     (baseline)      ║
+║   1    Naive                       2      0%     629x slower     ║
+║   2    Blocked                    42      3%      33x slower     ║
+║   3    + Pack A                  723     44%     1.9x slower     ║
+║   4    + Pack B                 1065     65%     1.3x slower     ║
+║   5    + Tuned                  1515     93%     1.1x FASTER     ║
+║   6    + Lazy                   1491     91%     1.1x FASTER     ║
+╚══════════════════════════════════════════════════════════════════╝
+```
+
+Key progression:
+- **Naive → Blocked**: ~21x speedup from using AMX hardware
+- **Blocked → +Pack A**: ~17x speedup from proper memory layout
+- **+Pack A → +Pack B**: ~1.5x speedup from on-the-fly B packing
+- **+Pack B → +Tuned**: ~1.4x speedup from optimal KC=1024
+- **Final result**: **Matches or exceeds** Apple's Accelerate framework
+
+### 12.3 Where the Remaining Gap Goes
+
+```
+Component               Time (ms)    % of Total
+──────────────────────────────────────────────
+Micro-kernel (no pack)    1.17        76%
+Micro-kernel (with pack)  0.28        18%
+A packing (lazy)          ~0          ~0% (overlapped)
+Loop overhead             0.03        2%
+Other                     0.05        4%
+──────────────────────────────────────────────
+Total                     1.50        100%
+
+The remaining 3% gap vs Accelerate is likely:
+    - First A pack not overlapped
+    - Slightly better Accelerate packing
+    - Different tile sizes or algorithms
+```
+
+## 13. Key Takeaways
+
+### 13.1 Principles
+
+1. **Memory hierarchy awareness**: Design algorithms around cache sizes
+2. **Data reuse**: Maximize arithmetic intensity through blocking
+3. **Memory layout**: Pack data for sequential access patterns
+4. **Hardware utilization**: Use specialized instructions (AMX, SIMD)
+5. **Overlap**: Hide latencies through pipelining and parallelism
+
+### 13.2 Methodology
+
+1. **Start with correctness**: Naive implementation first
+2. **Profile**: Identify bottlenecks (compute vs memory)
+3. **Block**: Match working sets to cache levels
+4. **Pack**: Optimize memory access patterns
+5. **Tune**: Systematic parameter optimization
+6. **Refine**: Advanced techniques (lazy packing, overlap)
+
+### 13.3 Generalization
+
+These techniques apply broadly:
+- **GPU programming**: Similar blocking for shared memory
+- **Distributed systems**: Block for network communication
+- **Database joins**: Block nested loop joins
+- **Deep learning**: Convolution as implicit GEMM
+
+## References
+
+1. Goto, K., & Van De Geijn, R. A. (2008). Anatomy of high-performance matrix multiplication. ACM Transactions on Mathematical Software, 34(3), 1-25.
+
+2. Low, T. M., et al. (2016). Analytical modeling is enough for high-performance BLIS. ACM Transactions on Mathematical Software, 43(2), 1-18.
+
+3. MpGEMM paper (arXiv:2512.21473): Multi-level blocking strategies for modern architectures.
+
+4. Apple AMX reverse engineering: https://github.com/corsix/amx
+
+## 14. Exercises
+
+Using `gemm_progressive.c`, try these exercises to deepen your understanding:
+
+### Exercise 1: Observe the Progression
+Run the demo and answer:
+- What is the single biggest performance jump? Why?
+- What percentage of theoretical peak does each stage achieve?
+- How does the Accelerate baseline compare to your results?
+
+### Exercise 2: Parameter Sensitivity
+Modify the `_TUNED_` constants in `gemm_tuned()`:
+- Try KC=256 instead of KC=1024. What happens and why?
+- Try MC=512 instead of MC=256. Does it help or hurt?
+- Calculate the working set size (MC×KC + KC×NC) for each configuration
+
+### Exercise 3: Understand the Micro-Kernel
+Study `microkernel_32x32()` and trace:
+- How many AMX FMA32 instructions execute per KC iterations?
+- How many total FLOPs does one micro-kernel call perform?
+- What is the arithmetic intensity (FLOPs per byte loaded)?
+
+### Exercise 4: Memory Access Patterns
+Compare `gemm_blocked()` vs `gemm_packed_a()`:
+- Why does packing give such a dramatic improvement?
+- Draw the memory access pattern for loading A[0:32, k] without packing
+- Draw the memory access pattern after packing
+
+### Exercise 5: Lazy vs Eager
+Compare `gemm_tuned()` vs `gemm_lazy()`:
+- When is lazy packing beneficial?
+- What would happen if KC were smaller (e.g., KC=128)?
+- Can you think of a scenario where eager packing would win?
+
+---
+
+*This chapter is part of a course on Data Systems, demonstrating how principled hardware-aware algorithm design can achieve near-peak performance on modern processors.*
