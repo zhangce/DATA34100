@@ -1,0 +1,12 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     sum_v1_fast
+relocations:
+  - { offset: 0x3750, size: 0x8, addend: 0x0, symName: __ZNSt3__124__put_character_sequenceB8ne180100IcNS_11char_traitsIcEEEERNS_13basic_ostreamIT_T0_EES7_PKS4_m, symObjAddr: 0x120, symBinAddr: 0x100003A1C, symSize: 0x164 }
+  - { offset: 0x4CE2, size: 0x8, addend: 0x0, symName: __ZNSt3__116__pad_and_outputB8ne180100IcNS_11char_traitsIcEEEENS_19ostreambuf_iteratorIT_T0_EES6_PKS4_S8_S8_RNS_8ios_baseES4_, symObjAddr: 0x284, symBinAddr: 0x100003B80, symSize: 0x1A4 }
+  - { offset: 0x558A, size: 0x8, addend: 0x0, symName: __ZNSt3__120__throw_length_errorB8ne180100EPKc, symObjAddr: 0x44C, symBinAddr: 0x100003D48, symSize: 0x50 }
+  - { offset: 0x689A, size: 0x8, addend: 0x0, symName: _main, symObjAddr: 0x0, symBinAddr: 0x1000038FC, symSize: 0x120 }
+  - { offset: 0x6F39, size: 0x8, addend: 0x0, symName: __ZNKSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE20__throw_length_errorB8ne180100Ev, symObjAddr: 0x438, symBinAddr: 0x100003D34, symSize: 0x14 }
+  - { offset: 0x6F63, size: 0x8, addend: 0x0, symName: __ZNSt3__120__throw_length_errorB8ne180100EPKc, symObjAddr: 0x44C, symBinAddr: 0x100003D48, symSize: 0x50 }
+  - { offset: 0x6F6E, size: 0x8, addend: 0x0, symName: __ZNSt12length_errorC1B8ne180100EPKc, symObjAddr: 0x49C, symBinAddr: 0x100003D98, symSize: 0x24 }
+...
