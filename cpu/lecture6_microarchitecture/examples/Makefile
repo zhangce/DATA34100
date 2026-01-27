@@ -22,25 +22,25 @@ all: $(TARGETS)
 add: add.cpp
 	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
-# matrix examples: compiled with -O1 for fair comparison
+# matrix examples: compiled with -O0 for fair comparison
 matrix_row: matrix_row.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 matrix_col: matrix_col.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
-# branch tests: compiled with -O1 to preserve branch structure
+# branch tests: compiled with -O0 to preserve branch structure
 branch_random: branch_random.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 branch_branchless: branch_branchless.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 branch_sorted: branch_sorted.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 branch_presorted: branch_presorted.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 # Run all examples
 run: all

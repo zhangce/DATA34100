@@ -1049,13 +1049,17 @@ for (i = 0; i < n; i++)
 \normalsize
 
 ```bash
-$ cd examples && make && ./branch_random && ./branch_branchless && ./branch_presorted
+$ cd examples && make branch_random && ./branch_random
+$ cd examples && make branch_branchless && ./branch_branchless
+$ cd examples && make branch_sorted && ./branch_sorted
+$ cd examples && make branch_presorted && ./branch_presorted
 ```
 
 | Version        | Time    |
 | -------------- | ------- |
 | A (branching)  | 298 ms  |
 | B (branchless) | 42 ms   |
+| C (sorted)     | 9235 ms |
 | C (pre-sorted) | 43ms    |
 
 Branchless is **7× faster** than branching on random data!
@@ -1169,17 +1173,17 @@ Only ~1 misprediction at the transition!
 ## Branch Performance Comparison
 
 ```bash
-$ cd examples
-$ perf stat -e branches,branch-misses ./branch_random
-$ perf stat -e branches,branch-misses ./branch_branchless
-$ perf stat -e branches,branch-misses ./branch_presorted
+$ cd examples && perf stat -e branches,branch-misses ./branch_random
+$ cd examples && perf stat -e branches,branch-misses ./branch_branchless
+$ cd examples && perf stat -e branches,branch-misses ./branch_sorted
+$ cd examples && perf stat -e branches,branch-misses ./branch_presorted
 ```
 
-| Approach      | Time   | Why                       |
-| ------------- | ------ | ------------------------- |
-| Branching     | ~298 ms | 50% misprediction rate    |
-| Branchless    | ~42 ms  | No branches to mispredict |
-| Sort + Branch | ~43 ms  | Predictable pattern       |
+| Approach                  | Time (random data) | Why                         |
+| ------------------------- | ------------------ | --------------------------- |
+| Branching                 | ~298 ms            | A lot of misprediction rate |
+| Branchless                | ~42 ms             | No branches to mispredict   |
+| Branching over pre-sorted | ~43 ms             | Predictable pattern         |
 
 **Note:** Sorting has O(n log n) cost, only worth it if you traverse multiple times or need sorted data anyway.
 
