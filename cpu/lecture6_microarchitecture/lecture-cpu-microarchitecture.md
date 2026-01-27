@@ -796,7 +796,7 @@ Access 0, 1, 2, ..., 15 → **1 miss, 15 hits**
 
 Then 16, 17, ..., 31 → **1 miss, 15 hits**
 
-Miss rate: **6.25%**
+Miss rate (Theoretical): **6.25%**
 :::
 ::: {.column width="50%"}
 **Column-major: stride = 4000 bytes**
@@ -809,18 +809,9 @@ Access 1000 → miss, load line
 
 Access 2000 → miss, load line
 
-Miss rate: **100%**
+Miss rate (Theoretical): **100%**
 :::
 ::::::
-
-## The Result: 7× Slower
-
-|Traversal|Time|Cache behavior|
-|---|---|---|
-|Row-major|~2 ms|1 miss per 16 accesses|
-|Column-major|~15 ms|1 miss per access|
-
-**Same computation. Same data. 7× performance difference.**
 
 # Measuring Cache Performance
 
@@ -1049,10 +1040,7 @@ for (i = 0; i < n; i++)
 \normalsize
 
 ```bash
-$ cd examples && make branch_random && ./branch_random
-$ cd examples && make branch_branchless && ./branch_branchless
-$ cd examples && make branch_sorted && ./branch_sorted
-$ cd examples && make branch_presorted && ./branch_presorted
+$ cd examples && make && ./branch_random  && ./branch_branchless && ./branch_sorted && ./branch_presorted
 ```
 
 | Version        | Time    |
@@ -1179,11 +1167,11 @@ $ cd examples && perf stat -e branches,branch-misses ./branch_sorted
 $ cd examples && perf stat -e branches,branch-misses ./branch_presorted
 ```
 
-| Approach                  | Time (random data) | Why                         |
-| ------------------------- | ------------------ | --------------------------- |
-| Branching                 | ~298 ms            | A lot of misprediction rate |
-| Branchless                | ~42 ms             | No branches to mispredict   |
-| Branching over pre-sorted | ~43 ms             | Predictable pattern         |
+| Approach                  | Time (random data) | Why                       |
+| ------------------------- | ------------------ | ------------------------- |
+| Branching                 | ~298 ms            | A lot of misprediction    |
+| Branchless                | ~42 ms             | No branches to mispredict |
+| Branching over pre-sorted | ~43 ms             | Predictable pattern       |
 
 **Note:** Sorting has O(n log n) cost, only worth it if you traverse multiple times or need sorted data anyway.
 
