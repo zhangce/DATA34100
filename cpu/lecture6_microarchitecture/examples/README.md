@@ -7,7 +7,10 @@
 | `add.cpp` | Simple addition to examine unoptimized assembly |
 | `matrix_row.cpp` | Row-major traversal (good spatial locality) |
 | `matrix_col.cpp` | Column-major traversal (bad spatial locality) |
-| `branch_test.cpp` | Branch prediction comparison |
+| `branch_random.cpp` | Branching on random data (unpredictable) |
+| `branch_branchless.cpp` | Branchless version (no mispredictions) |
+| `branch_sorted.cpp` | Sort + branch (includes sort time) |
+| `branch_presorted.cpp` | Branch on pre-sorted data (predictable) |
 
 ## Quick Start
 
@@ -51,24 +54,21 @@ perf stat -e L1-dcache-loads,L1-dcache-load-misses ./matrix_row
 perf stat -e L1-dcache-loads,L1-dcache-load-misses ./matrix_col
 ```
 
-### 3. branch_test.cpp - Branch Prediction
+### 3. Branch Prediction Examples
 
 ```bash
-make branch_test
-./branch_test
+make branch_random branch_branchless branch_presorted
+
+./branch_random      # ~298 ms (unpredictable branches)
+./branch_branchless  # ~42 ms  (no branches)
+./branch_presorted   # ~43 ms  (predictable branches)
 ```
 
-Expected output:
-```
-Version A (branching):  ~50-60 ms   (unpredictable branches)
-Version B (branchless): ~8-10 ms    (no branches)
-Version C (sorted):     ~15-20 ms   (includes sort time)
-Version C (pre-sorted): ~8-10 ms    (predictable branches)
-```
-
-With perf:
+With perf (run separately to measure each):
 ```bash
-perf stat -e branches,branch-misses ./branch_test
+perf stat -e branches,branch-misses ./branch_random
+perf stat -e branches,branch-misses ./branch_branchless
+perf stat -e branches,branch-misses ./branch_presorted
 ```
 
 ## Makefile Targets

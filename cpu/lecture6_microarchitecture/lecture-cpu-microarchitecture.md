@@ -728,7 +728,7 @@ for (int i = 0; i < 1000; i++)
 
 ```bash
 $ cd examples && make matrix_row && ./matrix_row
-Sum: ..., Time: 2 ms
+Sum: ..., Time: 478 ms
 ```
 
 ## Try this one
@@ -744,10 +744,10 @@ for (int j = 0; j < 1000; j++)
 
 ```bash
 $ cd examples && make matrix_col && ./matrix_col
-Sum: ..., Time: 15 ms
+Sum: ..., Time: 623 ms
 ```
 
-## Why 7× Slower?
+## Why Slower?
 
 :::::: {.columns}
 ::: {.column width="50%"}
@@ -848,11 +848,10 @@ $ perf stat -e L1-dcache-loads,L1-dcache-load-misses ./matrix_row
 ```
 
 ```
- 1,000,000,000      L1-dcache-loads
-    62,500,000      L1-dcache-load-misses  # 6.25% miss rate
+ Performance counter stats for './matrix_row':
+     6,028,299,510      L1-dcache-loads                                          
+        62,665,470      L1-dcache-load-misses     #    1.04% of all L1-dcache accesses
 ```
-
-**Matches our prediction!** 1M accesses, 1 miss per 16 accesses = 62.5K misses per iteration.
 
 (1000 iterations × 62,500 = 62.5M misses)
 
@@ -864,24 +863,20 @@ $ perf stat -e L1-dcache-loads,L1-dcache-load-misses ./matrix_col
 ```
 
 ```
- 1,000,000,000      L1-dcache-loads
- 1,000,000,000      L1-dcache-load-misses  # 100% miss rate
+     6,021,517,439      L1-dcache-loads                                          
+     1,012,648,771      L1-dcache-load-misses     #   16.82% of all L1-dcache accesses
 ```
 
-**Every single access misses L1 cache!**
-
-The data we need is never in cache because we jump 4000 bytes each time.
+A lot more L-1 cache misses.
 
 ## Cache Miss Summary
 
-|Traversal|L1 Loads|L1 Misses|Miss Rate|
-|---|---|---|---|
-|Row-major|1B|62.5M|6.25%|
-|Column-major|1B|1B|100%|
+| Traversal    | L1 Loads | L1 Misses | Miss Rate |
+| ------------ | -------- | --------- | --------- |
+| Row-major    | 6B       | 62M       | 1.04%     |
+| Column-major | 6B       | 1B        | 16.82%    |
 
-**16× more L1 cache misses → 7× slower**
-
-(Not 16× slower because L2/L3 partially hide the latency)
+**16× more L1 cache misses → 1.5× slower**
 
 **Takeaway:** `perf` lets you verify your mental model. When optimizing, measure first!
 
@@ -1054,14 +1049,14 @@ for (i = 0; i < n; i++)
 \normalsize
 
 ```bash
-$ cd examples && make branch_test && ./branch_test
+$ cd examples && make && ./branch_random && ./branch_branchless && ./branch_presorted
 ```
 
-|Version|Time|
-|---|---|
-|A (branching)|56 ms|
-|B (branchless)|8 ms|
-|C (sorted)|12 ms|
+| Version        | Time    |
+| -------------- | ------- |
+| A (branching)  | 298 ms  |
+| B (branchless) | 42 ms   |
+| C (pre-sorted) | 43ms    |
 
 Branchless is **7× faster** than branching on random data!
 
@@ -1174,14 +1169,17 @@ Only ~1 misprediction at the transition!
 ## Branch Performance Comparison
 
 ```bash
-$ cd examples && perf stat -e branches,branch-misses ./branch_test
+$ cd examples
+$ perf stat -e branches,branch-misses ./branch_random
+$ perf stat -e branches,branch-misses ./branch_branchless
+$ perf stat -e branches,branch-misses ./branch_presorted
 ```
 
-|Approach|Time (random data)|Why|
-|---|---|---|
-|Branching|~15 ms|50% misprediction rate|
-|Branchless|~3 ms|No branches to mispredict|
-|Sort + Branch|~4 ms|Predictable pattern|
+| Approach      | Time   | Why                       |
+| ------------- | ------ | ------------------------- |
+| Branching     | ~298 ms | 50% misprediction rate    |
+| Branchless    | ~42 ms  | No branches to mispredict |
+| Sort + Branch | ~43 ms  | Predictable pattern       |
 
 **Note:** Sorting has O(n log n) cost, only worth it if you traverse multiple times or need sorted data anyway.
 

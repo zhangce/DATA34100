@@ -12,7 +12,7 @@ CXXFLAGS_O0 = $(CXXFLAGS) -O0 -g
 CXXFLAGS_O1 = $(CXXFLAGS) -O1 -g
 CXXFLAGS_O2 = $(CXXFLAGS) -O2 -g
 
-TARGETS = add matrix_row matrix_col branch_test
+TARGETS = add matrix_row matrix_col branch_random branch_branchless branch_sorted branch_presorted
 
 .PHONY: all run perf asm clean
 
@@ -29,8 +29,17 @@ matrix_row: matrix_row.cpp
 matrix_col: matrix_col.cpp
 	$(CXX) $(CXXFLAGS_O1) $< -o $@
 
-# branch test: compiled with -O1 to preserve branch structure
-branch_test: branch_test.cpp
+# branch tests: compiled with -O1 to preserve branch structure
+branch_random: branch_random.cpp
+	$(CXX) $(CXXFLAGS_O1) $< -o $@
+
+branch_branchless: branch_branchless.cpp
+	$(CXX) $(CXXFLAGS_O1) $< -o $@
+
+branch_sorted: branch_sorted.cpp
+	$(CXX) $(CXXFLAGS_O1) $< -o $@
+
+branch_presorted: branch_presorted.cpp
 	$(CXX) $(CXXFLAGS_O1) $< -o $@
 
 # Run all examples
@@ -44,8 +53,17 @@ run: all
 	@echo "=== Running matrix_col (bad locality) ==="
 	./matrix_col
 	@echo ""
-	@echo "=== Running branch_test ==="
-	./branch_test
+	@echo "=== Running branch_random ==="
+	./branch_random
+	@echo ""
+	@echo "=== Running branch_branchless ==="
+	./branch_branchless
+	@echo ""
+	@echo "=== Running branch_sorted ==="
+	./branch_sorted
+	@echo ""
+	@echo "=== Running branch_presorted ==="
+	./branch_presorted
 
 # Run with perf stat (Linux only)
 perf: all
@@ -55,12 +73,21 @@ perf: all
 	@echo "=== Matrix Col (perf) ==="
 	perf stat -e L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses ./matrix_col
 	@echo ""
-	@echo "=== Branch Test (perf) ==="
-	perf stat -e branches,branch-misses,instructions,cycles ./branch_test
+	@echo "=== Branch Random (perf) ==="
+	perf stat -e branches,branch-misses,instructions,cycles ./branch_random
+	@echo ""
+	@echo "=== Branch Branchless (perf) ==="
+	perf stat -e branches,branch-misses,instructions,cycles ./branch_branchless
+	@echo ""
+	@echo "=== Branch Sorted (perf) ==="
+	perf stat -e branches,branch-misses,instructions,cycles ./branch_sorted
+	@echo ""
+	@echo "=== Branch Presorted (perf) ==="
+	perf stat -e branches,branch-misses,instructions,cycles ./branch_presorted
 
 # Generate assembly files
-asm: add.s matrix_row.s matrix_col.s branch_test.s
-	@echo "Assembly files generated: add.s, matrix_row.s, matrix_col.s, branch_test.s"
+asm: add.s matrix_row.s matrix_col.s branch_random.s branch_branchless.s
+	@echo "Assembly files generated"
 
 add.s: add.cpp
 	$(CXX) $(CXXFLAGS_O0) -S $< -o $@
@@ -71,7 +98,10 @@ matrix_row.s: matrix_row.cpp
 matrix_col.s: matrix_col.cpp
 	$(CXX) $(CXXFLAGS_O1) -S $< -o $@
 
-branch_test.s: branch_test.cpp
+branch_random.s: branch_random.cpp
+	$(CXX) $(CXXFLAGS_O1) -S $< -o $@
+
+branch_branchless.s: branch_branchless.cpp
 	$(CXX) $(CXXFLAGS_O1) -S $< -o $@
 
 clean:
