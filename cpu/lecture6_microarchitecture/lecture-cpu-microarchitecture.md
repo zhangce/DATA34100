@@ -784,7 +784,7 @@ Stride = 4000 bytes
 :::
 ::::::
 
-## Why 7× Slower? (Cache View)
+## Why Slower? (Cache View)
 
 :::::: {.columns}
 ::: {.column width="50%"}
@@ -1004,7 +1004,7 @@ The `add` is **starved**—cannot execute until data arrives.
 \end{document}
 ```
 
-Modern predictors are >95% accurate, **but** data-dependent branches can be unpredictable.
+Modern predictors are very accurate, **but** data-dependent branches can be unpredictable.
 
 ## Which is Fastest? (Random Data)
 
