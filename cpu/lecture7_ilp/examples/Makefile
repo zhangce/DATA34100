@@ -7,7 +7,7 @@
 
 CXX = g++
 CXXFLAGS = -std=c++14
-CXXFLAGS_O1 = $(CXXFLAGS) -O1 -g
+CXXFLAGS_O0 = $(CXXFLAGS) -O0 -g
 CXXFLAGS_O3 = $(CXXFLAGS) -O3 -g
 CXXFLAGS_FAST = $(CXXFLAGS) -O3 -ffast-math -g
 
@@ -19,40 +19,40 @@ all: $(TARGETS)
 
 # Sum examples
 sum_v1: sum_v1.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 sum_v2: sum_v2.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 sum_v3: sum_v3.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 # Dot product examples
 dot_v1: dot_v1.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 dot_v2: dot_v2.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 # Max examples
 max_v1: max_v1.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 max_v2: max_v2.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 max_v3: max_v3.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 # Count examples
 count_v1: count_v1.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 count_v2: count_v2.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 count_v3: count_v3.cpp
-	$(CXX) $(CXXFLAGS_O1) $< -o $@
+	$(CXX) $(CXXFLAGS_O0) $< -o $@
 
 # Build sum_v1 with -O3 -ffast-math for comparison
 sum_v1_fast: sum_v1.cpp
