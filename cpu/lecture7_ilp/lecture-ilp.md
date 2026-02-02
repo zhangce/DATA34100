@@ -56,11 +56,9 @@ header-includes:
 
 Modern CPUs can execute 4–8 operations per cycle:
 
-| Processor | Issue Width | ALU Ports | Load Ports |
-|-----------|-------------|-----------|------------|
-| Intel Skylake | 4 µOPs/cycle | 4 | 2 |
-| Apple M1 | 8 µOPs/cycle | 6 | 3 |
-| AMD Zen 4 | 6 µOPs/cycle | 4 | 3 |
+| Processor     | Issue Width  | ALU Ports | Load Ports |
+| ------------- | ------------ | --------- | ---------- |
+| Intel Skylake | 4 µOPs/cycle | 4         | 2          |
 
 . . .
 
@@ -187,13 +185,13 @@ $ cd examples && make sum_v1 && ./sum_v1
 
 ```bash
 $ cd examples && make sum_v1 && ./sum_v1
-Sum: 1e+08, Time: 152 ms
+Sum: 1e+08, Time: 237 ms
 ```
 
 **Why so slow?**
 
-- 100M additions at 3 GHz = should be ~33 ms if 1 add/cycle
-- But we're getting ~150 ms — about **0.2 adds/cycle**!
+- 100M additions at 1.5 GHz = should be ~66 ms if 1 add/cycle
+- But we're getting ~237 ms — about **0.25 adds/cycle**!
 
 . . .
 
@@ -289,18 +287,14 @@ double sum = sum1 + sum2 + sum3 + sum4;
 
 ```bash
 $ cd examples && make sum_v2 && ./sum_v2
-Sum: 1e+08, Time: 42 ms      # 3.6× speedup!
+Sum: 1e+08, Time: 60 ms      # ~ 4x speedup
 ```
 
-## Why Not 4× Speedup?
+## Other Overheads?
 
 **Theoretical:** 4 independent chains → 4× speedup
 
-**Actual:** 3.6× speedup
-
-. . .
-
-**Reasons:**
+**Other Overheads:**
 
 1. Loop overhead (increment, compare, branch)
 2. Memory bandwidth starting to matter
@@ -324,7 +318,7 @@ double sum = (s1+s2) + (s3+s4) + (s5+s6) + (s7+s8);
 
 ```bash
 $ cd examples && make sum_v3 && ./sum_v3
-Sum: 1e+08, Time: 38 ms      # Only 4× - hitting memory bandwidth!
+Sum: 1e+08, Time: 34 ms      # 2x more
 ```
 
 ## Performance Summary
@@ -333,35 +327,13 @@ Sum: 1e+08, Time: 38 ms      # Only 4× - hitting memory bandwidth!
 $ cd examples && make sum    # Run all three versions
 ```
 
-| Version | Accumulators | Time | Speedup |
-|---------|--------------|------|---------|
-| Naive | 1 | 152 ms | 1× |
-| 4× unrolled | 4 | 42 ms | 3.6× |
-| 8× unrolled | 8 | 38 ms | 4.0× |
+| Version     | Accumulators | Time   | Speedup |
+| ----------- | ------------ | ------ | ------- |
+| Naive       | 1            | 237 ms | 1×      |
+| 4× unrolled | 4            | 60 ms  | 3.5×    |
+| 8× unrolled | 8            | 34 ms  | 6.97×   |
 
-**Diminishing returns:** Beyond 4–8 accumulators, memory bandwidth dominates.
-
-```tikz
-\begin{document}
-\begin{tikzpicture}[scale=0.8]
-    \draw[->, thick] (0, 0) -- (7, 0) node[right] {Accumulators};
-    \draw[->, thick] (0, 0) -- (0, 4) node[above] {Speedup};
-
-    \draw[thick, blue, fill=blue!20] (1, 0) rectangle (1.5, 1);
-    \draw[thick, blue, fill=blue!20] (2.5, 0) rectangle (3, 3.6);
-    \draw[thick, blue, fill=blue!20] (4, 0) rectangle (4.5, 4);
-    \draw[thick, blue, fill=blue!20] (5.5, 0) rectangle (6, 4.1);
-
-    \node[below] at (1.25, 0) {1};
-    \node[below] at (2.75, 0) {4};
-    \node[below] at (4.25, 0) {8};
-    \node[below] at (5.75, 0) {16};
-
-    \draw[dashed, red] (0, 4) -- (7, 4);
-    \node[red, right] at (7, 4) {Memory limit};
-\end{tikzpicture}
-\end{document}
-```
+**Diminishing returns:** Beyond 4–8 accumulators, starts to see diminishing returns.
 
 # More Examples
 
@@ -395,11 +367,11 @@ double dot = d1 + d2 + d3 + d4;
 
 ```bash
 $ cd examples && make dot && ./dot_v1 && ./dot_v2
-Dot: 1e+08, Time: 168 ms   # naive
-Dot: 1e+08, Time: 56 ms    # 4x unrolled
+Dot: 1e+08, Time: 240.54 ms   # naive
+Dot: 1e+08, Time: 61.5316 ms    # 4x unrolled
 ```
 
-**3× speedup** — same pattern as sum!
+**4× speedup** — same pattern as sum!
 
 ## Example: Finding Maximum
 
@@ -443,14 +415,15 @@ double max_val = max(max(m1,m2), max(m3,m4));
 ```bash
 $ cd examples && make max
 Max: 1, Time: 312 ms       # v1: Branch mispredictions!
-Max: 1, Time: 156 ms       # v2: Branchless, 2x faster
-Max: 1, Time: 45 ms        # v3: Branchless + unrolled, 7x faster!
+Max: 1, Time: 156 ms       # v2: Branchless
+Max: 1, Time: 45 ms        # v3: Branchless + unrolled
 ```
 
 **Combining branchless + unrolling = massive speedup on random data.**
 
 ## Example: Count Elements
 
+\small
 ```cpp
 // count_v1.cpp: Naive with branch
 for (int i = 0; i < n; i++)
@@ -479,68 +452,50 @@ $ cd examples && make count   # Runs count_v1, count_v2, count_v3
 
 ## Why Does Unrolling Help?
 
-**Add latency:** 4 cycles (Skylake)
+**FP Add latency:** 4 cycles (Skylake)
 
-**Add throughput:** 2 per cycle (ports P0, P1)
+**FP Add throughput:** 2 per cycle (ports P0, P1)
 
-```tikz
-\begin{document}
-\begin{tikzpicture}[scale=0.7, transform shape]
+\tiny
+```
+1 accumulator (2 ports, but only 1 dependency chain):
+Cycle:      0   1   2   3   4   5   6   7
+Port 0:    [===|===|===|===]
+Port 1:                    [===|===|===|===]
+                           ↑ must wait for s1 to finish
 
-    % Timeline
-    \draw[->, thick] (0, 0) -- (12, 0) node[right] {Cycle};
-    \node[below] at (1, 0) {1};
-    \node[below] at (2, 0) {2};
-    \node[below] at (3, 0) {3};
-    \node[below] at (4, 0) {4};
-    \node[below] at (5, 0) {5};
-    \node[below] at (6, 0) {6};
-    \node[below] at (7, 0) {7};
-    \node[below] at (8, 0) {8};
-
-    % Single accumulator
-    \node[left] at (0, 2) {\textbf{1 acc:}};
-    \draw[fill=blue!30] (1, 1.7) rectangle (4.8, 2.3);
-    \node at (2.9, 2) {add1};
-    \draw[fill=blue!30] (5, 1.7) rectangle (8.8, 2.3);
-    \node at (6.9, 2) {add2};
-    \node at (10, 2) {wait...};
-
-    % 4 accumulators
-    \node[left] at (0, 4.5) {\textbf{4 acc:}};
-    \draw[fill=blue!30] (1, 4.2) rectangle (4.8, 4.8);
-    \node at (2.9, 4.5) {add1};
-    \draw[fill=green!30] (1, 3.5) rectangle (4.8, 4.1);
-    \node at (2.9, 3.8) {add2};
-    \draw[fill=orange!30] (1.2, 2.8) rectangle (5, 3.4);
-    \node at (3.1, 3.1) {add3};
-    \draw[fill=red!30] (1.4, 2.1) rectangle (5.2, 2.7);
-    \node at (3.3, 2.4) {add4};
-
-\end{tikzpicture}
-\end{document}
+8 accumulators (saturate both ports):
+Cycle:      0   1   2   3   4   5   6   7
+s1 (P0):   [===|===|===|===][===|...
+s2 (P1):   [===|===|===|===][===|...
+s3 (P0):       [===|===|===|===][...
+s4 (P1):       [===|===|===|===][...
+s5 (P0):           [===|===|===|===]
+s6 (P1):           [===|===|===|===]
+s7 (P0):               [===|===|===|===]
+s8 (P1):               [===|===|===|===]
 ```
 
+\normalsize
 With 1 accumulator: 1 add every 4 cycles = **0.25 adds/cycle**
 
-With 4 accumulators: 4 adds in 4 cycles = **1 add/cycle** (4× better!)
-
+With 8 accumulators: 2 adds every cycle = **2 adds/cycle** (8× better!)
 ## Latency vs Throughput
 
-| Operation | Latency | Throughput |
-|-----------|---------|------------|
-| Integer add | 1 cycle | 4/cycle |
-| FP add | 4 cycles | 2/cycle |
-| FP multiply | 4 cycles | 2/cycle |
-| FP divide | 10-20 cycles | 1/14 cycles |
-| Load (L1 hit) | 4 cycles | 2/cycle |
+| Operation     | Latency      | Throughput  |
+| ------------- | ------------ | ----------- |
+| Integer add   | 1 cycle      | 4/cycle     |
+| FP add        | 4 cycles     | 2/cycle     |
+| FP multiply   | 4 cycles     | 2/cycle     |
+| FP divide     | 10-20 cycles | 1/14 cycles |
+| Load (L1 hit) | 4 cycles     | 2/cycle     |
 
 . . .
 
 **Key insight:**
 
 - **Latency** = time for one operation to complete
-- **Throughput** = how many operations can be *in flight*
+- **Throughput** = how many operations can be issued in parallel
 
 To achieve throughput, you need **latency × throughput** independent operations!
 
@@ -575,12 +530,12 @@ for (int i = 0; i < n; i++) {
 ```
 
 ```bash
-$ cd examples && make fast    # Compare -O1 vs -O3 vs -O3 -ffast-math
-Time: 152 ms     # -O1
-Time: 152 ms     # -O3: Same!
+$ cd examples && make fast    # Compare -O1 vs -O3 -ffast-math
+Time: 238 ms     # -O1
+Time: 22 ms     # -O3: Same!
 ```
 
-**No!** The compiler cannot change the order of FP additions (not associative).
+**No!** The compiler cannot change the order of FP additions without `-ffast-math` (not associative).
 
 ## Enabling Compiler Optimizations
 
@@ -651,10 +606,8 @@ The compiler generates **SIMD code** with multiple accumulators!
 
 **Practical advice:** Start with 4×, measure, try 8×.
 
-Beyond 8× rarely helps (memory becomes bottleneck).
-
 ## The Complete Pattern
-
+\small
 ```cpp
 // Template for any associative reduction
 T reduce(T* a, int n, T init, T (*op)(T, T)) {
@@ -681,185 +634,32 @@ T reduce(T* a, int n, T init, T (*op)(T, T)) {
 
 # Diagnosing ILP with PMU Counters
 
-## The First Metric: IPC
+## IPC
 
 **IPC (Instructions Per Cycle)** = instructions retired / cycles
 
+\small
 ```bash
 $ cd examples && make sum_v1 sum_v2
 $ perf stat ./sum_v1
-        481,234,567      cycles
-        125,012,345      instructions    #  0.26 IPC
+     1,998,092,185      cycles                    #    4.966 GHz                      (83.11%)
+     3,014,800,364      instructions              #    1.51  insn per cycle         
+
+                                                  #    0.03  stalled cycles per insn  (83.24%)
 
 $ perf stat ./sum_v2
-        132,456,789      cycles
-        175,023,456      instructions    #  1.32 IPC
+     1,086,025,270      cycles                    #    4.848 GHz                      (82.16%)
+     2,903,562,007      instructions              #    2.67  insn per cycle         
+
+                                                  #    0.06  stalled cycles per insn  (84.02%)
 ```
 
 . . .
 
-**Low IPC (< 1) often indicates ILP problems!**
+**Low IPC often indicates ILP problems!**
 
 - Modern CPUs can retire 4+ instructions/cycle
 - IPC of 0.26 means we're leaving ~90% performance on the table
-
-## Intel's Top-Down Analysis
-
-Intel CPUs provide **topdown** counters that categorize where cycles go:
-
-```bash
-$ cd examples && perf stat -M TopdownL1 ./sum_v1
-    48.2%  backend_bound        # ← ILP problem!
-    12.1%  frontend_bound
-     8.3%  bad_speculation
-    31.4%  retiring
-```
-
-. . .
-
-| Category | Meaning |
-|----------|---------|
-| **Backend Bound** | Waiting for data or execution resources |
-| Frontend Bound | Instruction fetch/decode stalls |
-| Bad Speculation | Wasted work from mispredicted branches |
-| Retiring | Useful work (higher is better!) |
-
-**High backend_bound = likely ILP issue**
-
-## Backend Bound: Digging Deeper
-
-```bash
-$ cd examples && perf stat -M TopdownL2 ./sum_v1
-    Backend Bound:
-        42.1%  core_bound          # ← Execution unit stalls
-         6.1%  memory_bound        # ← Memory access stalls
-```
-
-. . .
-
-**Core Bound** = waiting for execution resources
-
-- Could be port contention (not enough ALUs)
-- Could be **dependency chains** (our problem!)
-
-**Memory Bound** = waiting for data from cache/memory
-
-## Specific Counters for ILP
-
-```bash
-$ cd examples
-$ perf stat -e cycles,instructions,uops_executed.thread,\
-uops_issued.any,resource_stalls.any ./sum_v1
-```
-
-| Counter | Meaning |
-|---------|---------|
-| `uops_executed.thread` | µOPs actually executed |
-| `uops_issued.any` | µOPs sent to execution |
-| `resource_stalls.any` | Cycles stalled on resources |
-| `cycle_activity.stalls_total` | Total stall cycles |
-
-. . .
-
-**Key ratio:** `uops_executed / cycles`
-
-- Should be 2–4 on modern CPUs
-- If < 1, you have an ILP problem
-
-## Example: Diagnosing Our Sum
-
-```bash
-$ cd examples && make perf   # Runs all perf comparisons
-
-$ perf stat -e cycles,uops_executed.thread ./sum_v1
-        480,000,000      cycles
-        125,000,000      uops_executed.thread  # 0.26 uops/cycle!
-
-$ perf stat -e cycles,uops_executed.thread ./sum_v2
-        130,000,000      cycles
-        180,000,000      uops_executed.thread  # 1.38 uops/cycle
-```
-
-. . .
-
-**Diagnosis:** Naive version executes only 0.26 µops/cycle
-
-**Cause:** Dependency chain — each add waits 4 cycles for previous
-
-**Solution:** Multiple accumulators → 1.38 µops/cycle (5× better!)
-
-## Port Utilization
-
-For advanced diagnosis, check which execution ports are busy:
-
-```bash
-$ cd examples
-$ perf stat -e uops_dispatched_port.port_0,\
-uops_dispatched_port.port_1,uops_dispatched_port.port_5 ./sum_v2
-```
-
-. . .
-
-If one port is saturated while others are idle → restructure code
-
-If all ports have low utilization → dependency problem (our case!)
-
-## Quick Diagnosis Flowchart
-
-```tikz
-\begin{document}
-\begin{tikzpicture}[scale=0.75, transform shape,
-    box/.style={draw, rectangle, rounded corners, minimum width=2.5cm, minimum height=0.7cm, align=center, font=\small}]
-
-    \node[box, fill=blue!20] (ipc) at (0, 4) {Measure IPC};
-
-    \node[box, fill=green!20] (high) at (-3, 2) {IPC > 2};
-    \node[box, fill=red!20] (low) at (3, 2) {IPC < 1};
-
-    \node[box, fill=green!30] (good) at (-3, 0) {Probably OK};
-
-    \node[box, fill=orange!20] (check) at (3, 0) {Check topdown};
-
-    \node[box, fill=red!30] (be) at (1, -2) {Backend bound?};
-    \node[box, fill=yellow!30] (fe) at (5, -2) {Frontend bound?};
-
-    \node[box, fill=red!40] (ilp) at (1, -4) {ILP problem!};
-    \node[box, fill=yellow!40] (cache) at (5, -4) {I-cache/branch};
-
-    \draw[->, thick] (ipc) -- (high);
-    \draw[->, thick] (ipc) -- (low);
-    \draw[->, thick] (high) -- (good);
-    \draw[->, thick] (low) -- (check);
-    \draw[->, thick] (check) -- (be);
-    \draw[->, thick] (check) -- (fe);
-    \draw[->, thick] (be) -- (ilp);
-    \draw[->, thick] (fe) -- (cache);
-
-\end{tikzpicture}
-\end{document}
-```
-
-## Practical Commands
-
-```bash
-$ cd examples
-
-# Quick IPC check
-$ perf stat ./sum_v1
-
-# Top-down analysis (Intel)
-$ perf stat -M TopdownL1 ./sum_v1
-
-# Detailed execution metrics
-$ perf stat -e cycles,instructions,uops_executed.thread ./sum_v1
-
-# Compare two versions
-$ perf stat ./sum_v1 && perf stat ./sum_v2
-```
-
-. . .
-
-**Rule of thumb:** If IPC < 1 and backend_bound > 40%, try loop unrolling!
 
 # Summary
 
