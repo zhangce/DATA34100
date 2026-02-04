@@ -113,19 +113,19 @@ One instruction operates on multiple data elements simultaneously.
     % SSE
     \draw[fill=blue!20] (1, 0.2) rectangle (3, 1.2);
     \node at (2, 0.7) {SSE/SSE2};
-    \node[below] at (2, 0) {1999};
+    \node[below] at (2, 0) {};
     \node[above] at (2, 1.2) {128-bit};
 
     % AVX
     \draw[fill=green!20] (4, 0.2) rectangle (6, 1.5);
     \node at (5, 0.85) {AVX/AVX2};
-    \node[below] at (5, 0) {2011};
+    \node[below] at (5, 0) {};
     \node[above] at (5, 1.5) {256-bit};
 
     % AVX-512
     \draw[fill=orange!20] (7, 0.2) rectangle (9.5, 1.8);
     \node at (8.25, 1) {AVX-512};
-    \node[below] at (8.25, 0) {2017};
+    \node[below] at (8.25, 0) {};
     \node[above] at (8.25, 1.8) {512-bit};
 
     % Our focus
@@ -220,15 +220,15 @@ __m256i  i;  // 32 bytes / 16 shorts / 8 ints / 4 longs
 
     % ZMM (512-bit)
     \draw[fill=orange!20] (0, 2) rectangle (10, 2.8);
-    \node at (5, 2.4) {\texttt{zmm0} (512 bits) - AVX-512};
+    \node at (6, 2.4) {\centering \small \texttt{zmm0}};
 
     % YMM (256-bit)
     \draw[fill=green!30] (0, 2) rectangle (5, 2.8);
-    \node at (2.5, 2.4) {\texttt{ymm0} (256 bits) - AVX};
+    \node at (3.5, 2.4) {\centering \small \texttt{ymm0}};
 
     % XMM (128-bit)
     \draw[fill=blue!40] (0, 2) rectangle (2.5, 2.8);
-    \node at (1.25, 2.4) {\texttt{xmm0}};
+    \node at (1.25, 2.4) {\centering \small \texttt{xmm0}};
 
     % Labels
     \node[right] at (10.5, 2.4) {Lower half is ymm};
@@ -355,86 +355,6 @@ c = _mm256_fmadd_pd(a, b, c);  // One instruction!
 
 **FMA is crucial:** `a*b + c` in one instruction with same latency as add alone!
 
-# Example: Vector Addition
-
-## Scalar Version
-
-```cpp
-// add_v1.cpp
-void add_scalar(double* a, double* b, double* c, int n) {
-    for (int i = 0; i < n; i++) {
-        c[i] = a[i] + b[i];
-    }
-}
-```
-
-```bash
-$ cd examples && make add
-```
-
-## SIMD Version
-
-```cpp
-// add_v2.cpp
-void add_simd(double* a, double* b, double* c, int n) {
-    for (int i = 0; i < n; i += 4) {
-        __m256d va = _mm256_loadu_pd(a + i);
-        __m256d vb = _mm256_loadu_pd(b + i);
-        __m256d vc = _mm256_add_pd(va, vb);
-        _mm256_storeu_pd(c + i, vc);
-    }
-}
-```
-
-**2x speedup!** (Limited by memory bandwidth, not compute)
-
-## Visualizing the SIMD Loop
-
-```tikz
-\begin{document}
-\begin{tikzpicture}[scale=0.7, transform shape]
-
-    % Arrays
-    \node at (-1, 3) {a:};
-    \draw[fill=blue!20] (0, 2.7) rectangle (0.8, 3.3);
-    \draw[fill=blue!20] (0.8, 2.7) rectangle (1.6, 3.3);
-    \draw[fill=blue!20] (1.6, 2.7) rectangle (2.4, 3.3);
-    \draw[fill=blue!20] (2.4, 2.7) rectangle (3.2, 3.3);
-    \draw[fill=blue!10] (3.2, 2.7) rectangle (4, 3.3);
-    \draw[fill=blue!10] (4, 2.7) rectangle (4.8, 3.3);
-    \node at (5.5, 3) {...};
-
-    \node at (-1, 2) {b:};
-    \draw[fill=green!20] (0, 1.7) rectangle (0.8, 2.3);
-    \draw[fill=green!20] (0.8, 1.7) rectangle (1.6, 2.3);
-    \draw[fill=green!20] (1.6, 1.7) rectangle (2.4, 2.3);
-    \draw[fill=green!20] (2.4, 1.7) rectangle (3.2, 2.3);
-    \draw[fill=green!10] (3.2, 1.7) rectangle (4, 2.3);
-    \draw[fill=green!10] (4, 1.7) rectangle (4.8, 2.3);
-    \node at (5.5, 2) {...};
-
-    % Bracket for iteration 1
-    \draw[thick, red] (0, 2.5) -- (0, 3.5) -- (3.2, 3.5) -- (3.2, 2.5);
-    \node[red, above] at (1.6, 3.5) {Iteration 1 (i=0..3)};
-
-    % Bracket for iteration 2
-    \draw[thick, orange, dashed] (3.2, 1.5) -- (3.2, 0.8) -- (6.4, 0.8) -- (6.4, 1.5);
-    \node[orange, below] at (4.8, 0.8) {Iteration 2 (i=4..7)};
-
-    % Result
-    \node at (-1, 0.5) {c:};
-    \draw[fill=orange!30] (0, 0.2) rectangle (0.8, 0.8);
-    \draw[fill=orange!30] (0.8, 0.2) rectangle (1.6, 0.8);
-    \draw[fill=orange!30] (1.6, 0.2) rectangle (2.4, 0.8);
-    \draw[fill=orange!30] (2.4, 0.2) rectangle (3.2, 0.8);
-    \node at (5.5, 0.5) {...};
-
-\end{tikzpicture}
-\end{document}
-```
-
-Each loop iteration processes **4 elements** with one SIMD instruction.
-
 # Example: Sum Reduction (Revisited)
 
 ## The Challenge
@@ -495,6 +415,7 @@ double sum = _mm_cvtsd_f64(sum128);               // Extract scalar
 
 ## Complete SIMD Sum
 
+\tiny
 ```cpp
 // sum_v1.cpp
 double sum_simd(double* a, int n) {
@@ -516,6 +437,7 @@ double sum_simd(double* a, int n) {
 
 ## SIMD Sum: Even Better with Unrolling
 
+\tiny
 ```cpp
 // sum_v2.cpp
 double sum_simd_unrolled(double* a, int n) {
@@ -534,22 +456,17 @@ double sum_simd_unrolled(double* a, int n) {
 }
 ```
 
-**8 independent chains** = maximum ILP for FP add!
-
 ## Sum Performance Comparison
 
 ```bash
 $ cd examples && make sum
 ```
 
-| Version | Time | Speedup |
-|---------|------|---------|
-| SIMD (1 accumulator) | 42 ms | 3.6x |
-| SIMD + 2x unrolled | 25 ms | 6x |
-
+| Version              | Time   |
+| -------------------- | ------ |
+| SIMD (1 accumulator) | 104 ms |
+| SIMD + 2x unrolled   | 52 ms  |
 . . .
-
-**Key insight:** SIMD with one accumulator = scalar with 4 accumulators
 
 For maximum performance: **SIMD + unrolling** together!
 
@@ -570,6 +487,7 @@ double dot_scalar(double* a, double* b, int n) {
 
 ## SIMD Dot Product with FMA
 
+\tiny
 ```cpp
 // dot_v2.cpp
 double dot_simd(double* a, double* b, int n) {
@@ -596,8 +514,6 @@ double dot_simd(double* a, double* b, int n) {
 ```bash
 $ cd examples && make dot
 ```
-
-**4.8x speedup!**
 
 - FMA does multiply+add in one instruction
 - 4 parallel multiply-adds per iteration
@@ -629,6 +545,7 @@ for (int i = 0; i < n; i++) {
 $ cd examples && make cond
 ```
 
+\tiny
 ```cpp
 // conditional.cpp
 __m256d threshold = _mm256_set1_pd(0.5);
@@ -728,60 +645,6 @@ $ grep vaddpd add.s
 
 **Yes, often!** With `-O3 -march=native`, compilers auto-vectorize simple loops.
 
-## When Auto-Vectorization Fails
-
-**1. Aliasing** — pointers might overlap
-
-```cpp
-void add(double* a, double* b, double* c, int n) {
-    for (int i = 0; i < n; i++)
-        c[i] = a[i] + b[i];  // What if c overlaps a or b?
-}
-```
-
-**Fix:** Use `restrict` keyword or `#pragma`
-
-```cpp
-void add(double* restrict a, double* restrict b,
-         double* restrict c, int n) { ... }
-```
-
-## When Auto-Vectorization Fails (cont'd)
-
-**2. Complex control flow**
-
-```cpp
-while (a[i] > 0) {  // Not a countable loop!
-    ...
-}
-```
-
-**3. Function calls in loop**
-
-**4. Floating-point associativity** (for reductions)
-
-```cpp
-sum += a[i];  // Can't reorder without -ffast-math
-```
-
-**Fix:** Use `-ffast-math` or `-fassociative-math`
-
-## Helping the Compiler
-
-```cpp
-// Tell compiler there's no aliasing
-#pragma GCC ivdep
-for (int i = 0; i < n; i++)
-    c[i] = a[i] + b[i];
-
-// Force vectorization (GCC)
-#pragma GCC optimize("tree-vectorize")
-
-// Check if compiler vectorized
-$ g++ -O3 -fopt-info-vec-optimized file.cpp
-file.cpp:5: optimized: loop vectorized using 32 byte vectors
-```
-
 ## When to Use Intrinsics vs Compiler
 
 **Use compiler vectorization when:**
@@ -796,72 +659,6 @@ file.cpp:5: optimized: loop vectorized using 32 byte vectors
 - Need guaranteed vectorization
 - Maximum performance required
 - Compiler fails to vectorize
-
-# Alignment
-
-## Why Alignment Matters
-
-**32-byte alignment** = address divisible by 32
-
-```cpp
-// Unaligned (any address)
-double* a = (double*)malloc(n * sizeof(double));
-
-// Aligned to 32 bytes
-double* a = (double*)aligned_alloc(32, n * sizeof(double));
-```
-
-. . .
-
-**Performance impact:**
-
-- Modern CPUs: unaligned nearly as fast
-- But: `_mm256_load_pd` on unaligned = **crash!**
-- Aligned loads enable more optimizations
-
-## Allocating Aligned Memory
-
-```cpp
-// C11 standard
-double* a = aligned_alloc(32, n * sizeof(double));
-
-// POSIX
-double* a;
-posix_memalign((void**)&a, 32, n * sizeof(double));
-
-// C++ 17
-double* a = static_cast<double*>(
-    std::aligned_alloc(32, n * sizeof(double)));
-
-// On stack
-alignas(32) double a[1024];
-```
-
-## Safe Loading Pattern
-
-```cpp
-void process(double* a, int n) {
-    int i = 0;
-
-    // Handle unaligned prefix
-    while (((uintptr_t)(a + i) & 31) != 0 && i < n) {
-        // Scalar processing
-        process_one(a[i]);
-        i++;
-    }
-
-    // Main loop: aligned
-    for (; i + 4 <= n; i += 4) {
-        __m256d v = _mm256_load_pd(a + i);  // Safe!
-        // ...
-    }
-
-    // Handle remainder
-    for (; i < n; i++) {
-        process_one(a[i]);
-    }
-}
-```
 
 # Practical Guidelines
 
@@ -896,50 +693,6 @@ void process(double* a, int n) {
 - Lots of branches/conditionals
 - Gather/scatter intensive
 
-## Complete Example: SAXPY
-
-```bash
-$ cd examples && make sax
-```
-
-```cpp
-// saxpy.cpp - y = a*x + y
-void saxpy_simd(float* y, float a, float* x, int n) {
-    __m256 va = _mm256_set1_ps(a);  // Broadcast a
-
-    int i = 0;
-    for (; i + 8 <= n; i += 8) {
-        __m256 vx = _mm256_loadu_ps(x + i);
-        __m256 vy = _mm256_loadu_ps(y + i);
-        vy = _mm256_fmadd_ps(va, vx, vy);  // y = a*x + y
-        _mm256_storeu_ps(y + i, vy);
-    }
-
-    // Handle remainder
-    for (; i < n; i++) {
-        y[i] = a * x[i] + y[i];
-    }
-}
-```
-
-# Summary
-
-## Key Takeaways
-
-1. **SIMD** = process 4-8 elements with one instruction
-   - AVX: 4 doubles or 8 floats per instruction
-
-2. **Intrinsics** give you direct control over SIMD
-   - `_mm256_add_pd`, `_mm256_load_pd`, etc.
-
-3. **SIMD + ILP** together for maximum performance
-   - Use multiple vector accumulators
-
-4. **Compiler can auto-vectorize** simple cases
-   - But intrinsics give you more control
-
-5. **Alignment** matters — use 32-byte aligned memory
-
 ## Performance Hierarchy
 
 ```tikz
@@ -960,14 +713,207 @@ void saxpy_simd(float* y, float a, float* x, int n) {
     \draw[fill=green!30] (8, 0.5) rectangle (10.5, 1.5);
     \node at (9.25, 1) {SIMD+ILP};
 
-    \node[below] at (1, 0.3) {1x};
-    \node[below] at (3.75, 0.3) {4x};
-    \node[below] at (6.5, 0.3) {4x};
-    \node[below] at (9.25, 0.3) {8-16x};
 
 \end{tikzpicture}
 \end{document}
 ```
+
+# Beyond SIMD: Scalar → Vector → Matrix
+
+## The Progression: Scalar → Vector → Matrix
+
+```tikz
+\begin{document}
+\begin{tikzpicture}[scale=0.8, transform shape]
+
+    % Scalar
+    \node at (0, 3) {\textbf{Scalar}};
+    \draw[fill=blue!20] (0, 2.3) rectangle (0.5, 2.8);
+    \node at (0.25, 2.55) {\tiny 1};
+    \node at (0.25, 1.8) {1 op};
+
+    % SIMD
+    \node at (3, 3) {\textbf{SIMD}};
+    \draw[fill=green!20] (2, 2.3) rectangle (2.5, 2.8);
+    \draw[fill=green!20] (2.5, 2.3) rectangle (3, 2.8);
+    \draw[fill=green!20] (3, 2.3) rectangle (3.5, 2.8);
+    \draw[fill=green!20] (3.5, 2.3) rectangle (4, 2.8);
+    \node at (3, 1.8) {4-8 ops};
+
+    % AMX
+    \node at (8, 3) {e.g., \textbf{AMX}};
+    \foreach \i in {0,...,3} {
+        \foreach \j in {0,...,3} {
+            \draw[fill=orange!20] (6.5+\i*0.5, 2.3-\j*0.5) rectangle (7+\i*0.5, 2.8-\j*0.5);
+        }
+    }
+    \node at (8, -0.5) {16$\times$16 = 256 ops};
+
+    % Arrows
+    \draw[->, thick] (1, 2.5) -- (1.8, 2.5);
+    \draw[->, thick] (4.2, 2.5) -- (6.3, 1.5);
+
+\end{tikzpicture}
+\end{document}
+```
+
+## Apple AMX: Matrix Coprocessor
+
+**AMX = Apple Matrix eXtensions** (M1/M2/M3 chips, undocumated but it is there)
+
+- Dedicated matrix coprocessor (not just wider SIMD)
+- Computes **16×16 outer products** in one instruction
+- Used by Accelerate framework, PyTorch, etc.
+
+. . .
+
+**Register layout:**
+
+| Register | Size | Contents (fp32) |
+|----------|------|-----------------|
+| X[0-7] | 64 bytes each | 16 floats per register |
+| Y[0-7] | 64 bytes each | 16 floats per register |
+| Z | 4 KB total | 16×16 accumulator matrix |
+
+## AMX Operation: Outer Product
+
+```tikz
+\begin{document}
+\begin{tikzpicture}[scale=0.8, transform shape]
+
+    % Y vector (row on top)
+    \node[left] at (1.5, 3.5) {\texttt{Y}:};
+    \foreach \i in {0,...,3} {
+        \draw[fill=green!20] (2+\i*0.7, 3.2) rectangle (2.6+\i*0.7, 3.8);
+        \node at (2.3+\i*0.7, 3.5) {\tiny y\i};
+    }
+    \node at (5.2, 3.5) {\small ...};
+    \draw[fill=green!20] (5.6, 3.2) rectangle (6.2, 3.8);
+    \node at (5.9, 3.5) {\tiny y15};
+
+    % X vector (column on left)
+    \node[above] at (0.8, 2.6) {\texttt{X}:};
+    \foreach \i in {0,...,3} {
+        \draw[fill=blue!20] (0.5, 2.3-\i*0.7) rectangle (1.1, 2.9-\i*0.7);
+        \node at (0.8, 2.6-\i*0.7) {\tiny x\i};
+    }
+    \node at (0.8, -0.4) {\small ...};
+    \draw[fill=blue!20] (0.5, -1.1) rectangle (1.1, -0.5);
+    \node at (0.8, -0.8) {\tiny x15};
+
+    % Z matrix
+    \foreach \i in {0,...,3} {
+        \foreach \j in {0,...,3} {
+            \draw[fill=orange!20] (2+\i*0.7, 2.3-\j*0.7) rectangle (2.6+\i*0.7, 2.9-\j*0.7);
+        }
+    }
+    % dots for rows
+    \node at (3.6, -0.4) {\small ...};
+    % dots for cols
+    \node at (5.2, 1.2) {\small ...};
+    % bottom-right corner
+    \draw[fill=orange!20] (5.6, -1.1) rectangle (6.2, -0.5);
+
+    % Label
+    \node at (4, -1.8) {\texttt{Z[i][j] += X[i] * Y[j]}};
+
+    % Right side explanation
+    \node[right] at (7, 2) {16 $\times$ 16 = 256 FMAs};
+    \node[right] at (7, 1) {\textbf{One instruction!}};
+
+\end{tikzpicture}
+\end{document}
+```
+
+## AMX in C++: A Glimpse
+
+\tiny
+```cpp
+#include "amx.h"  // Apple's undocumented AMX "intrinsics"
+
+// Compute 16x16 outer product: Z += X * Y^T
+void amx_outer_product(float* X, float* Y, float* Z) {
+    AMX_SET();  // Enable AMX coprocessor
+
+    // Load 16 floats into X register 0
+    AMX_LDX(ldx_operand(X, 0));
+
+    // Load 16 floats into Y register 0
+    AMX_LDY(ldy_operand(Y, 0));
+
+    // FMA: Z[i][j] += X[i] * Y[j] for all i,j in [0,16)
+    AMX_FMA32(fma32_operand(0, 0, 0));
+
+    // Store result (64 bytes per row, 16 rows)
+    for (int row = 0; row < 16; row++)
+        AMX_STZ(stz_operand(Z + row * 16, row));
+
+    AMX_CLR();  // Disable AMX
+}
+```
+
+
+## The Big Picture: Processing in Chunks
+
+```tikz
+\begin{document}
+\begin{tikzpicture}[scale=0.75, transform shape]
+
+    \draw[->, thick] (0, 0) -- (12, 0) node[right] {Chunk Size};
+    \draw[->, thick] (0, 0) -- (0, 4) node[above] {Throughput};
+
+    % Points
+    \filldraw[blue] (1, 0.5) circle (3pt) node[below=5pt] {Scalar};
+    \filldraw[green!60!black] (3.5, 1.5) circle (3pt) node[below=5pt] {SSE};
+    \filldraw[orange] (5.5, 2.2) circle (3pt) node[below=5pt] {AVX};
+    \filldraw[red] (7.5, 2.8) circle (3pt) node[below=5pt] {AVX-512};
+    \filldraw[purple] (10, 3.5) circle (3pt) node[below=5pt] {AMX};
+
+    % Curve
+    \draw[thick, dashed, gray] (0.5, 0.3) .. controls (4, 2) and (7, 3) .. (11, 3.7);
+
+    % Labels
+    \node[blue] at (1, 1) {\small 1};
+    \node[green!60!black] at (3.5, 2) {\small 4};
+    \node[orange] at (5.5, 2.7) {\small 8};
+    \node[red] at (7.5, 3.3) {\small 16};
+    \node[purple] at (10, 4) {\small 256};
+
+\end{tikzpicture}
+\end{document}
+```
+
+**Trend:** Increasing parallelism through larger "chunks" of computation
+
+. . .
+
+**On GPUs:** This becomes **Tensor Cores** (NVIDIA)
+
+\small
+```
+// PTX instruction: 16×8×16 matrix multiply = 4096 FLOPs!
+mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16
+    {d0,d1,d2,d3}, {a0,a1,a2,a3}, {b0,b1}, {c0,c1,c2,c3};
+```
+
+
+# Summary
+
+## Key Takeaways
+
+1. **SIMD** = process 4-8 elements with one instruction
+   - AVX: 4 doubles or 8 floats per instruction
+
+2. **Intrinsics** give you direct control over SIMD
+   - `_mm256_add_pd`, `_mm256_load_pd`, etc.
+
+3. **SIMD + ILP** together for maximum performance
+   - Use multiple vector accumulators
+
+4. **Compiler can auto-vectorize** simple cases
+   - But intrinsics give you more control
+
+5. **Alignment** matters — use 32-byte aligned memory
 
 ## Try It Yourself
 
