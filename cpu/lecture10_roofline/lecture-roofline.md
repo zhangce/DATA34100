@@ -27,8 +27,6 @@ When optimizing code, we need to know:
 
 The **Roofline Model** answers this question visually and quantitatively.
 
-*Reference: Williams, Waterman, and Patterson, "Roofline: An Insightful Visual Performance Model for Multicore Architectures," Communications of the ACM, 2009*
-
 ## The Two Ceilings
 
 Every program faces two fundamental limits:
@@ -75,12 +73,20 @@ $$\pi = \text{cores} \times \text{SIMD width} \times \text{FMA units} \times \te
 
 $$\pi = 1 \times 4 \times 2 \times 2 = 16 \text{ flops/cycle}$$
 
-. . .
+## Platform Parameters
 
 **Peak Bandwidth $\beta$** [bytes/cycle or GB/s]:
 
-- Measured empirically (STREAM benchmark)
-- Typically 60-70% of theoretical maximum
+Theoretical bandwidth is determined by hardware specs:
+
+$$\beta_{\text{theo}} = \text{channels} \times \text{data rate} \times \text{bus width}$$
+
+. . .
+
+**Example:** DDR4-2400, dual channel:
+
+- 2 channels $\times$ 2400 MT/s $\times$ 8 bytes = 38.4 GB/s
+
 
 ## Algorithm Parameters
 
@@ -152,7 +158,7 @@ This is a **piecewise linear function** in log-log space:
     \draw[->] (0, 0) -- (0, 5) node[above] {$P$ [flops/cycle]};
 
     % Log scale labels on x-axis
-    \foreach \x/\label in {1/1/8, 2.5/1/2, 4/2, 5.5/8, 7/32} {
+    \foreach \x/\label in {} {
         \draw (\x, -0.1) -- (\x, 0.1);
         \node[below, font=\small] at (\x, -0.1) {\label};
     }
@@ -203,13 +209,13 @@ This is a **piecewise linear function** in log-log space:
     \draw[very thick, black] (0.5, 0.5) -- (4, 4) -- (9, 4);
 
     % Example points
-    \fill[red] (2, 1.5) circle (4pt);
-    \node[right, red, font=\small] at (2.2, 1.5) {A: memory bound};
-    \node[right, red, font=\small] at (2.2, 1.1) {(far from roof)};
+    \fill[red] (2, 1.2) circle (4pt);
+    \node[right, red, font=\small] at (2.2, 1.2) {A: memory bound};
+    \node[right, red, font=\small] at (2.2, 0.8) {(far from roof)};
 
-    \fill[blue] (2, 2.3) circle (4pt);
-    \node[left, blue, font=\small] at (1.8, 2.5) {B: memory bound};
-    \node[left, blue, font=\small] at (1.8, 2.1) {(close to roof)};
+    \fill[blue] (2, 1.8) circle (4pt);
+    \node[left, blue, font=\small] at (1.8, 2.1) {B: memory bound};
+    \node[left, blue, font=\small] at (1.8, 1.7) {(close to roof)};
 
     \fill[green!60!black] (6, 2.5) circle (4pt);
     \node[right, green!60!black, font=\small] at (6.2, 2.5) {C: compute bound};
@@ -220,17 +226,134 @@ This is a **piecewise linear function** in log-log space:
     \node[left, orange, font=\small] at (5.8, 3.4) {(close to roof)};
 
     % Vertical arrows showing gap
-    \draw[->, dashed, red] (2, 1.5) -- (2, 2.25);
+    \draw[->, dashed, red] (2, 1.2) -- (2, 1.75);
     \draw[->, dashed, green!60!black] (6, 2.5) -- (6, 3.95);
 \end{tikzpicture}
 \end{document}
 ```
-
 **Goal:** Move points up toward the roof, or right to increase $I$.
+
+## Optimization 1: ILP (Instruction-Level Parallelism)
+
+**Scenario:** Compute-bound code with a single accumulator (latency-limited).
+
+```tikz
+\begin{document}
+\begin{tikzpicture}[scale=0.85, transform shape]
+    % Axes
+    \draw[->] (0, 0) -- (10, 0) node[right] {$I$};
+    \draw[->] (0, 0) -- (0, 5) node[above] {$P$};
+
+    % Roofline
+    \draw[very thick, blue] (0.5, 0.5) -- (4, 4);
+    \draw[very thick, red] (4, 4) -- (9, 4);
+    \node[red, font=\small] at (7.5, 4.4) {$\pi = 16$ flops/cycle};
+    \node[blue, font=\small, rotate=45] at (1.5, 1.8) {$\beta I$};
+
+    % Before: single accumulator, latency-limited
+    \fill[gray] (6.5, 2) circle (4pt);
+    \node[right, gray, font=\small] at (6.7, 2) {Before: 1 accumulator};
+    \node[right, gray, font=\small] at (6.7, 1.6) {(latency-limited, $P = 2$)};
+
+    % After: multiple accumulators
+    \fill[green!60!black] (6.5, 3.8) circle (4pt);
+    \node[right, green!60!black, font=\small] at (6.7, 3.8) {After: 4 accumulators};
+    \node[right, green!60!black, font=\small] at (6.7, 3.4) {(hide latency, $P = 8$)};
+
+    % Arrow: purely vertical (same I, higher P)
+    \draw[->, very thick, green!60!black] (6.5, 2.2) -- (6.5, 3.6);
+
+    % Annotation
+    \node[font=\small, align=center] at (3, 0.7) {ILP: same $I$, higher $P$\\(move \textbf{up})};
+\end{tikzpicture}
+\end{document}
+```
+
+**ILP does not change operational intensity** -- same work, same data.
+
+## Optimization 2: SIMD (Vectorization)
+
+**Scenario:** Code that processes one element at a time.
+
+```tikz
+\begin{document}
+\begin{tikzpicture}[scale=0.85, transform shape]
+    % Axes
+    \draw[->] (0, 0) -- (10, 0) node[right] {$I$};
+    \draw[->] (0, 0) -- (0, 5.5) node[above] {$P$};
+
+    % Roofline with sub-ceilings
+    \draw[very thick, blue] (0.5, 0.5) -- (4, 4);
+    \draw[thick, red!40, dashed] (2.5, 2.5) -- (9, 2.5);
+    \node[red!40, font=\small] at (7.5, 2.8) {Scalar ceiling: $\pi/4$};
+    \draw[very thick, red] (4, 4) -- (9, 4);
+    \node[red, font=\small] at (7.5, 4.4) {SIMD ceiling: $\pi$};
+
+    % Before: scalar
+    \fill[gray] (5.5, 2.2) circle (4pt);
+    \node[left, gray, font=\small] at (5.3, 2.2) {Before: scalar};
+
+    % After: SIMD
+    \fill[green!60!black] (5.5, 3.8) circle (4pt);
+    \node[left, green!60!black, font=\small] at (5.3, 3.8) {After: AVX (4-wide)};
+
+    % Arrow: purely vertical (same I, higher P)
+    \draw[->, very thick, green!60!black] (5.5, 2.4) -- (5.5, 3.6);
+
+    % Annotation
+    \node[font=\small, align=center] at (3, 0.7) {SIMD: same $I$, higher $P$\\(move \textbf{up})};
+\end{tikzpicture}
+\end{document}
+```
+
+**SIMD does not change operational intensity** -- same work, same data.
+
+## Optimization 3: Blocking (Tiling)
+
+**Scenario:** Matrix multiplication -- reduce data movement via cache reuse.
+
+```tikz
+\begin{document}
+\begin{tikzpicture}[scale=0.85, transform shape]
+    % Axes
+    \draw[->] (0, 0) -- (10, 0) node[right] {$I$};
+    \draw[->] (0, 0) -- (0, 5) node[above] {$P$};
+
+    % Roofline
+    \draw[very thick, blue] (0.5, 0.5) -- (4, 4);
+    \draw[very thick, red] (4, 4) -- (9, 4);
+    \node[red, font=\small] at (7.5, 4.4) {$\pi$};
+    \node[blue, font=\small, rotate=45] at (1.5, 1.8) {$\beta I$};
+
+    % Before: naive GEMM (low I, memory bound)
+    \fill[gray] (2, 1.8) circle (4pt);
+    \node[above, gray, font=\small] at (2, 1.9) {Naive GEMM};
+    \node[below, gray, font=\small] at (2, 1.7) {$I = 1/4$};
+
+    % After: blocked GEMM (high I, compute bound)
+    \fill[green!60!black] (7, 3.8) circle (4pt);
+    \node[above, green!60!black, font=\small] at (7, 3.9) {Blocked GEMM};
+    \node[below, green!60!black, font=\small] at (7, 3.7) {$I = 32$};
+
+    % Arrow: diagonal (higher I, higher P)
+    \draw[->, very thick, green!60!black] (2.2, 2) -- (6.8, 3.7);
+
+    % Ridge point
+    \draw[dashed, gray] (4, 0) -- (4, 4);
+    \node[below, gray, font=\tiny] at (4, 0) {$I^*$};
+
+    % Annotation
+    \node[font=\small, align=center] at (7.5, 1) {Blocking: higher $I$, higher $P$\\(move \textbf{right and up})};
+\end{tikzpicture}
+\end{document}
+```
+
+**Blocking reduces data movement $Q$**, increasing operational intensity $I = W/Q$.
 
 # Computing Operational Intensity
 
 ## Example 1: Vector Addition (DAXPY)
+\tiny
 
 $$y = \alpha x + y$$
 
@@ -258,11 +381,10 @@ $Q = 24n$ bytes
 
 . . .
 
-**Operational Intensity:**
-
-$$I = \frac{2n}{24n} = \frac{1}{12} \approx 0.083 \text{ flops/byte}$$
+**Operational Intensity:** $I = \frac{2n}{24n} = \frac{1}{12} \approx 0.083 \text{ flops/byte}$
 
 ## Example 2: Dot Product
+\tiny
 
 $$s = x^T y = \sum_{i=0}^{n-1} x_i \cdot y_i$$
 
@@ -290,12 +412,10 @@ $Q = 16n$ bytes
 
 . . .
 
-**Operational Intensity:**
-
-$$I = \frac{2n}{16n} = \frac{1}{8} = 0.125 \text{ flops/byte}$$
+**Operational Intensity:** $I = \frac{2n}{16n} = \frac{1}{8} = 0.125 \text{ flops/byte}$
 
 ## Example 3: Matrix-Vector Multiplication
-
+\tiny
 $$y = Ax$$
 
 ```cpp
@@ -330,7 +450,7 @@ $Q \approx 8n^2$ bytes (dominated by $A$)
 $$I = \frac{2n^2}{8n^2} = \frac{1}{4} = 0.25 \text{ flops/byte}$$
 
 ## Example 4: Matrix-Matrix Multiplication (Naive)
-
+\tiny
 $$C = AB$$
 
 ```cpp
@@ -363,62 +483,50 @@ $$I = \frac{2n^3}{8n^3} = \frac{1}{4} \text{ flops/byte}$$
 Same as matrix-vector!
 
 ## Example 4b: Matrix-Matrix Multiplication (Blocked)
-
+\tiny
 With blocking (block size $b$, $3b^2 \leq$ cache):
 
 **Data movement:**
+We divide $A$, $B$, $C$ into $b \times b$ blocks. For each block $C_{ij}$:
 
-$$Q = \frac{n^3}{4b} \times 8 = \frac{2n^3}{b} \text{ bytes}$$
+$$C_{ij} = \sum_{k=1}^{n/b} A_{ik} B_{kj}$$
+
+Each block multiply loads three $b \times b$ blocks ($A_{ik}$, $B_{kj}$, $C_{ij}$), fitting in cache since $3b^2 \leq \gamma$.
+
+. . .
+
+**Total block multiplies:** $(n/b)^3 = n^3/b^3$
+
+**Bytes per block multiply:** $3 \times 8b^2$ (but $C_{ij}$ is reused across $k$)
+
+Net loads: each of the $n^2/b^2$ blocks of $A$ is read $n/b$ times, same for $B$:
+
+$$Q = 2 \times \frac{n^2}{b^2} \times \frac{n}{b} \times 8b^2 = \frac{2n^3}{b} \times 8$$
 
 . . .
 
 **Operational Intensity (blocked):**
 
-$$I = \frac{2n^3}{2n^3/b} = b \text{ flops/byte}$$
+$$I = \frac{W}{Q} = \frac{2n^3}{16n^3/b} = \frac{b}{8} \text{ flops/byte}$$
 
 . . .
 
-**With optimal blocking:** $b = O(\sqrt{\gamma})$ where $\gamma$ is cache size
+**With optimal blocking:** $b = O(\sqrt{\gamma})$ where $\gamma$ is cache size in elements
 
 $$I = O(\sqrt{\gamma})$$
 
-**Example:** L1 cache = 32KB, $b \approx 32$, so $I \approx 32$ flops/byte!
-
-## Example 5: FFT
-
-**Discrete Fourier Transform:** $y = F_n x$
-
-**Work:** $W = 5n \log_2 n$ flops (using FFT algorithm)
-
-. . .
-
-**Data movement:**
-
-- Naive: $Q = O(n \log n)$ bytes
-- Cache-optimal: $Q = O(n)$ bytes
-
-. . .
-
-**Operational Intensity:**
-
-$$I = O(\log n) \text{ to } O(\log \gamma)$$
-
-where $\gamma$ is cache size.
-
-. . .
-
-FFT has **intermediate** operational intensity -- neither fully memory bound nor compute bound.
+**Example:** L1 cache = 32KB $= 4096$ doubles, $b \approx 36$, so $I \approx 36/8 \approx 4.5$ flops/byte
 
 ## Summary: Operational Intensity
 
-| Operation | $W$ | $Q$ | $I$ |
-|-----------|-----|-----|-----|
-| DAXPY: $y = \alpha x + y$ | $2n$ | $24n$ | $1/12$ |
-| Dot product: $x^T y$ | $2n$ | $16n$ | $1/8$ |
-| GEMV: $y = Ax$ | $2n^2$ | $8n^2$ | $1/4$ |
-| GEMM naive: $C = AB$ | $2n^3$ | $8n^3$ | $1/4$ |
-| GEMM blocked: $C = AB$ | $2n^3$ | $2n^3/b$ | $b \sim O(\sqrt{\gamma})$ |
-| FFT | $5n\log n$ | $8n$ | $O(\log n)$ |
+| Operation                 | $W$        | $Q$      | $I$                       |
+| ------------------------- | ---------- | -------- | ------------------------- |
+| DAXPY: $y = \alpha x + y$ | $2n$       | $24n$    | $1/12$                    |
+| Dot product: $x^T y$      | $2n$       | $16n$    | $1/8$                     |
+| GEMV: $y = Ax$            | $2n^2$     | $8n^2$   | $1/4$                     |
+| GEMM naive: $C = AB$      | $2n^3$     | $8n^3$   | $1/4$                     |
+| GEMM blocked: $C = AB$    | $2n^3$     | $16n^3/b$ | $b/8 \sim O(\sqrt{\gamma})$ |
+
 
 . . .
 
@@ -437,8 +545,7 @@ FFT has **intermediate** operational intensity -- neither fully memory bound nor
 
 **Memory bandwidth:**
 
-- Theoretical: ~20 GB/s per channel
-- Measured (STREAM): $\beta \approx 15$ GB/s $= 5$ bytes/cycle at 3 GHz
+- Let's assume: $\beta \approx 15$ GB/s $= 5$ bytes/cycle at 3 GHz
 
 . . .
 
@@ -468,7 +575,6 @@ $$I^* = \frac{\pi}{\beta} = \frac{16}{5} = 3.2 \text{ flops/byte}$$
     }
 
     % Roofline (beta = 5, pi = 16)
-    % Memory bound: P = 5*I, so log2(P) = log2(5) + log2(I)
     \draw[very thick, blue] (0.5, 0.8) -- (5.7, 5);
     \draw[very thick, red] (5.7, 5) -- (9.5, 5);
 
@@ -483,9 +589,6 @@ $$I^* = \frac{\pi}{\beta} = \frac{16}{5} = 3.2 \text{ flops/byte}$$
     \fill[purple] (2.2, 1.8) circle (4pt);
     \node[right, purple, font=\small] at (2.4, 1.8) {GEMV};
 
-    \fill[green!60!black] (3.2, 2.5) circle (4pt);
-    \node[above, green!60!black, font=\small] at (3.2, 2.6) {FFT};
-
     \fill[cyan] (7.5, 4.8) circle (4pt);
     \node[right, cyan, font=\small] at (7.7, 4.8) {GEMM};
 
@@ -495,16 +598,16 @@ $$I^* = \frac{\pi}{\beta} = \frac{16}{5} = 3.2 \text{ flops/byte}$$
 \end{tikzpicture}
 \end{document}
 ```
-
 ## Where Do Common Operations Fall?
 
-| **Memory Bound** | **Compute Bound** |
-|------------------|-------------------|
+| **Memory Bound**                        | **Compute Bound**                         |
+| --------------------------------------- | ----------------------------------------- |
 | BLAS Level 1: DAXPY, Dot product, Norms | BLAS Level 3: GEMM, Matrix factorizations |
-| BLAS Level 2: GEMV, Matrix-vector solve | Dense linear algebra |
-| Stencils, SpMV, Graph algorithms | Convolutions (tiled), Deep learning |
+| BLAS Level 2: GEMV, Matrix-vector solve | Dense linear algebra                      |
+| Stencils, SpMV, Graph algorithms        | Convolutions, GEMM                        |
 
 ## Numerical Example: DAXPY
+\tiny
 
 **Problem:** $y = 2x + y$, vectors of length $n = 10^8$
 
@@ -530,45 +633,6 @@ $$P = \min(\pi, \beta \cdot I) = \min(48, 15 \times 0.083) = \min(48, 1.25) = 1.
 
 $$T = \frac{W}{P} = \frac{2 \times 10^8}{1.25 \times 10^9} = 0.16 \text{ seconds}$$
 
-## Numerical Example: GEMM
-
-**Problem:** $C = AB$, matrices of size $n = 1000$
-
-**Platform:** Same as before
-
-. . .
-
-**Analysis:**
-
-- $W = 2 \times 10^9$ flops
-- With blocking ($b = 32$): $I \approx 32$ flops/byte
-
-. . .
-
-**Maximum achievable performance:**
-
-$$P = \min(\pi, \beta \cdot I) = \min(48, 15 \times 32) = \min(48, 480) = 48 \text{ GFLOPS}$$
-
-. . .
-
-**GEMM is compute bound!** We can achieve peak performance.
-
-**Minimum runtime:**
-
-$$T = \frac{W}{P} = \frac{2 \times 10^9}{48 \times 10^9} = 0.042 \text{ seconds}$$
-
-## Numerical Example: Effect of Problem Size on GEMM
-
-| Matrix size $n$ | Block fits in L1? | Effective $I$ | Bound |
-|-----------------|-------------------|---------------|-------|
-| 32 | Yes | $\sim 32$ | Compute |
-| 100 | Borderline | $\sim 10$ | Compute |
-| 1000 | No (need L3) | $\sim 5$ | Borderline |
-| 10000 | No (need RAM) | $\sim 1$ | Memory |
-
-. . .
-
-**Key insight:** Same algorithm can be memory bound or compute bound depending on problem size and cache behavior!
 
 # Adding More Roofs
 
@@ -588,16 +652,12 @@ Not all code can achieve peak $\pi$:
 
     % Multiple compute ceilings
     \draw[very thick, red] (5.5, 5) -- (9.5, 5);
-    \node[right, red, font=\small] at (9.5, 5) {Peak (FMA+SIMD)};
+    \node[right, red, font=\small] at (9.5, 5) {Peak (SIMD)};
 
-    \draw[thick, red!70] (4.5, 4) -- (9.5, 4);
-    \node[right, red!70, font=\small] at (9.5, 4) {No FMA};
 
     \draw[thick, red!50] (3.5, 3) -- (9.5, 3);
     \node[right, red!50, font=\small] at (9.5, 3) {Scalar only};
 
-    \draw[thick, red!30] (2.5, 2) -- (9.5, 2);
-    \node[right, red!30, font=\small] at (9.5, 2) {Add-only};
 
     % Example point
     \fill[green!60!black] (6, 2.8) circle (4pt);
@@ -609,18 +669,6 @@ Not all code can achieve peak $\pi$:
 
 ## Example: Instruction Mix Ceilings
 
-**Skylake single core:**
-
-| Configuration | Peak [flops/cycle] |
-|---------------|-------------------|
-| Scalar, add only | 1 |
-| Scalar, mul only | 1 |
-| Scalar, FMA | 2 |
-| AVX (4-wide), add only | 4 |
-| AVX, mul only | 4 |
-| AVX, FMA | 16 |
-
-. . .
 
 **Your code's ceiling depends on:**
 
@@ -642,39 +690,28 @@ Different memory levels have different bandwidths:
     % Compute ceiling
     \draw[very thick, red] (6, 5) -- (9.5, 5);
 
-    % L1 bandwidth (highest)
+    % L1 bandwidth: (0.5,2)--(6,5), slope=3/5.5, angle~29deg
+    % at x=2.5: y = 2 + 0.545*2 = 3.09
     \draw[very thick, blue] (0.5, 2) -- (6, 5);
-    \node[blue, font=\small, rotate=25] at (2, 2.7) {L1: 96 B/cycle};
+    \node[blue, font=\small, rotate=29, above] at (2.5, 3.1) {L1: 96 B/cycle};
 
-    % L2 bandwidth
+    % L2 bandwidth: (0.5,1.3)--(7,5), slope=3.7/6.5, angle~30deg
+    % at x=3.5: y = 1.3 + 0.569*3 = 3.0
     \draw[thick, blue!70] (0.5, 1.3) -- (7, 5);
-    \node[blue!70, font=\small, rotate=32] at (1.5, 1.5) {L2: 32 B/cycle};
+    \node[blue!70, font=\small, rotate=30, above] at (3.5, 3.0) {L2: 32 B/cycle};
 
-    % L3 bandwidth
+    % L3 bandwidth: (0.5,0.8)--(8,5), slope=4.2/7.5, angle~29deg
+    % at x=5: y = 0.8 + 0.56*4.5 = 3.32
     \draw[thick, blue!50] (0.5, 0.8) -- (8, 5);
-    \node[blue!50, font=\small, rotate=33] at (1, 0.7) {L3: 16 B/cycle};
+    \node[blue!50, font=\small, rotate=29, above] at (5, 3.3) {L3: 16 B/cycle};
 
-    % DRAM bandwidth
+    % DRAM bandwidth: (0.5,0.4)--(9,5), slope=4.6/8.5, angle~28deg
+    % at x=6.5: y = 0.4 + 0.541*6 = 3.65
     \draw[thick, blue!30] (0.5, 0.4) -- (9, 5);
-    \node[blue!30, font=\small, rotate=28] at (2.5, 0.5) {DRAM: 5 B/cycle};
+    \node[blue!30, font=\small, rotate=28, above] at (6.5, 3.6) {DRAM: 5 B/cycle};
 \end{tikzpicture}
 \end{document}
 ```
-
-## Which Bandwidth Applies?
-
-**Rule:** Use the bandwidth of the memory level where your data resides.
-
-. . .
-
-| Working set size | Memory level | Typical $\beta$ |
-|------------------|--------------|-----------------|
-| < 32 KB | L1 | 96 B/cycle |
-| < 256 KB | L2 | 32 B/cycle |
-| < 8 MB | L3 | 16 B/cycle |
-| > 8 MB | DRAM | 5 B/cycle |
-
-. . .
 
 **Implication:** Same code, different problem sizes = different rooflines!
 
@@ -702,134 +739,22 @@ Different memory levels have different bandwidths:
     \draw[dashed, blue] (5, 0) -- (5, 5);
     \node[below, blue, font=\tiny] at (5, 0) {$I^* = 8$};
 
-    % Example point
-    \fill[red] (4, 3.5) circle (4pt);
-    \node[right, red, font=\small] at (4.2, 3.5) {Was compute bound};
-    \node[right, red, font=\small] at (4.2, 3.1) {Now memory bound!};
+    % Example point: at x=4, below scalar ceiling (y=3)
+    % Was compute bound (right of old ridge, below pi=2)
+    % Now memory bound (left of new ridge, below beta*I line)
+    \fill[red] (4, 2.7) circle (4pt);
+    \node[right, red, font=\small] at (4.2, 2.7) {Was compute bound};
+    \node[right, red, font=\small] at (4.2, 2.3) {Now memory bound!};
 \end{tikzpicture}
 \end{document}
 ```
 
 **SIMD increases $\pi$, shifting the ridge point right!**
+**
 
-# Practical Examples
+## Example: Matrix Multiplication - Batch Size Effect
 
-## Example: Sum Reduction
-
-```cpp
-double sum(double* a, int n) {
-    double s = 0;
-    for (int i = 0; i < n; i++)
-        s += a[i];
-    return s;
-}
-```
-
-. . .
-
-**Work:** $W = n$ flops (additions only)
-
-**Data:** $Q = 8n$ bytes
-
-**Operational intensity:** $I = n / 8n = 1/8 = 0.125$ flops/byte
-
-. . .
-
-**On Skylake ($\beta = 5$ B/cycle):**
-
-$$P_{\max} = \beta \cdot I = 5 \times 0.125 = 0.625 \text{ flops/cycle}$$
-
-**Heavily memory bound!** Even perfect code is limited to 0.625 flops/cycle.
-
-## Example: Polynomial Evaluation
-
-Evaluate $p(x) = a_0 + a_1 x + a_2 x^2 + \cdots + a_{n-1} x^{n-1}$
-
-Using Horner's method:
-
-```cpp
-double horner(double* a, int n, double x) {
-    double result = a[n-1];
-    for (int i = n-2; i >= 0; i--)
-        result = result * x + a[i];  // FMA!
-    return result;
-}
-```
-
-. . .
-
-**Work:** $W = 2n - 1 \approx 2n$ flops
-
-**Data:** $Q = 8n$ bytes (read coefficients)
-
-**Operational intensity:** $I = 2n / 8n = 1/4$ flops/byte
-
-. . .
-
-Still memory bound, but better than sum!
-
-## Example: Stencil Computation
-
-2D 5-point stencil (heat equation):
-
-```cpp
-// stencil.cpp
-for (int i = 1; i < n-1; i++)
-    for (int j = 1; j < n-1; j++)
-        B[i][j] = 0.25 * (A[i-1][j] + A[i+1][j] +
-                         A[i][j-1] + A[i][j+1]);
-```
-
-```bash
-$ cd examples && make run_stencil
-```
-
-. . .
-
-**Work:** $W = 4n^2$ flops (3 adds + 1 mul per point)
-
-**Data (naive):** $Q \approx 8n^2 + 8n^2 = 16n^2$ bytes
-
-**Operational intensity:** $I = 4n^2 / 16n^2 = 1/4$ flops/byte
-
-. . .
-
-**With temporal blocking:** Can increase to $I = O(B)$ where $B$ is block size.
-
-## Example: Sparse Matrix-Vector (SpMV)
-
-$y = Ax$ where $A$ is sparse with $nnz$ nonzeros
-
-```cpp
-// CSR format
-for (int i = 0; i < n; i++) {
-    double sum = 0;
-    for (int j = row_ptr[i]; j < row_ptr[i+1]; j++)
-        sum += val[j] * x[col_idx[j]];
-    y[i] = sum;
-}
-```
-
-. . .
-
-**Work:** $W = 2 \times nnz$ flops
-
-**Data:**
-
-- Values: $8 \times nnz$ bytes
-- Column indices: $4 \times nnz$ bytes
-- $x$ vector: irregular access (hard to reuse)
-
-$Q \approx 12 \times nnz + 8n$ bytes
-
-. . .
-
-**Operational intensity:** $I \approx 2/12 = 1/6$ flops/byte
-
-**SpMV is almost always memory bound!**
-
-## Example: Deep Learning - Batch Size Effect
-
+\tiny
 Forward pass of fully-connected layer: $Y = XW$ where $X$ is batch $\times$ input, $W$ is input $\times$ output
 
 . . .
@@ -889,7 +814,9 @@ $$I \approx \frac{2 \times \text{batch} \times \text{in} \times \text{out}}{8(\t
 \end{document}
 ```
 
-**This is why LLM inference (batch=1) is memory bound!**
+**This is why LLM decoding (batch=1) is memory bound.**
+
+**Batching as an optimization works because a larger batch leads to a higher performance celing (ie doing more makes it more efficient, so we better do more)**
 
 # Using the Roofline for Optimization
 
@@ -933,9 +860,6 @@ $$I \approx \frac{2 \times \text{batch} \times \text{in} \times \text{out}}{8(\t
 4. **Prefetching:** Hide memory latency
 5. **Compression:** Reduce data volume
 
-. . .
-
-**Example:** Naive MMM ($I = 1/4$) $\rightarrow$ Blocked MMM ($I = 32$)
 
 ## If Compute Bound...
 
@@ -951,84 +875,8 @@ $$I \approx \frac{2 \times \text{batch} \times \text{in} \times \text{out}}{8(\t
 4. **Algorithm improvement:** Reduce total work
 5. **Parallelization:** Use multiple cores
 
-. . .
-
-**Example:** Scalar sum $\rightarrow$ SIMD sum with 4 accumulators
-
-## Measuring Operational Intensity
-
-**Option 1: Calculate from algorithm**
-
-- Count flops and bytes analytically
-- Assumes perfect cache behavior
-
-. . .
-
-**Option 2: Use performance counters**
-
-```bash
-# Measure actual cache misses
-perf stat -e fp_arith_inst_retired.scalar_double,\
-fp_arith_inst_retired.256b_packed_double,\
-LLC-load-misses,LLC-store-misses ./program
-```
-
-. . .
-
-**Option 3: Use profiling tools**
-
-- Intel Advisor (roofline analysis built-in)
-- NVIDIA Nsight (for GPUs)
-- likwid-perfctr
-
-## Example: Diagnosing Poor Performance
-
-**Scenario:** Your GEMM achieves 5 GFLOPS on a 48 GFLOPS machine.
-
-. . .
-
-**Step 1:** Calculate theoretical $I$
-
-With proper blocking: $I \approx 32$ flops/byte
-
-. . .
-
-**Step 2:** Check which roof applies
-
-$P_{\max} = \min(48, 5 \times 32) = \min(48, 160) = 48$ GFLOPS
-
-Should be compute bound!
-
-. . .
-
-**Step 3:** Diagnose compute bottleneck
-
-- Check SIMD: Is code vectorized? (expect 4x)
-- Check ILP: Multiple accumulators? (expect 2x from FMA latency hiding)
-- Check FMA: Are multiply-adds fused? (expect 2x)
 
 # Roofline Variations
-
-## Cold Cache vs Warm Cache
-
-**Cold cache:** Data starts in main memory
-
-- Use DRAM bandwidth
-- $Q$ = all data accessed
-
-. . .
-
-**Warm cache:** Data pre-loaded in cache
-
-- Use cache bandwidth
-- $Q$ = only capacity misses
-
-. . .
-
-**Which to use?**
-
-- Cold cache: One-time computations, streaming
-- Warm cache: Repeated computations, iterative algorithms
 
 ## Roofline for Different Data Types
 
@@ -1057,25 +905,6 @@ Should be compute bound!
 \end{document}
 ```
 
-## GPU Roofline
-
-GPUs have different characteristics:
-
-| Parameter  | CPU (Skylake) | GPU (A100)    |
-| ---------- | ------------- | ------------- |
-| Peak FP64  | 48 GFLOPS     | 9,700 GFLOPS  |
-| Peak FP32  | 96 GFLOPS     | 19,500 GFLOPS |
-| Bandwidth  | 50 GB/s       | 2,000 GB/s    |
-| Ridge FP32 | 2 flops/byte  | 10 flops/byte |
-
-. . .
-
-**GPU has higher ridge point** -- more operations become memory bound!
-
-**GPU roofline also considers:**
-
-- HBM vs L2 vs shared memory bandwidth
-- Tensor core peak vs CUDA core peak
 
 ## Hierarchical Roofline
 
@@ -1147,30 +976,3 @@ $$P \leq \min(\pi, \beta \cdot I)$$
 
 5. **Measure** with perf counters to validate analysis
 
-## Try It Yourself
-
-```bash
-# Run all examples and see operational intensities
-$ cd examples && make run
-
-# Compare intensities side by side
-$ cd examples && make intensity
-
-# Use perf to measure actual cache behavior
-$ cd examples && make perf
-```
-
-## Operational Intensity Cheat Sheet
-
-| Low $I$ (memory bound) | High $I$ (compute bound) |
-|------------------------|--------------------------|
-| BLAS 1, 2 | BLAS 3 |
-| SpMV | Dense LA |
-| Stencils (naive) | Stencils (blocked) |
-| Graph algorithms | Convolutions (tiled) |
-| LLM inference (batch=1) | LLM training (large batch) |
-| Streaming | Iterative |
-
-. . .
-
-**The roofline model is your first tool for performance analysis!**

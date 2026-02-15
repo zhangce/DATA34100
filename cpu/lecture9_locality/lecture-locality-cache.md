@@ -9,54 +9,35 @@ header-includes:
   - \usepackage{tikz}
   - \usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, calc, decorations.pathreplacing}
 ---
+## Journey So Far
 
-# The Memory Wall
+We have learned how to make the CPU go fast:
 
-## The Processor-Memory Bottleneck
-
-```tikz
-\begin{document}
-\begin{tikzpicture}[scale=0.9, transform shape]
-    % CPU
-    \draw[fill=blue!20, rounded corners] (0, 0) rectangle (2, 1.5);
-    \node at (1, 1.1) {\textbf{CPU}};
-    \node at (1, 0.5) {\small Registers};
-
-    % Arrow
-    \draw[->, very thick] (2.2, 0.75) -- (5.8, 0.75);
-    \node[above] at (4, 0.85) {\small Bus bandwidth};
-
-    % Memory
-    \draw[fill=green!20, rounded corners] (6, 0) rectangle (9, 1.5);
-    \node at (7.5, 0.75) {\textbf{Main Memory}};
-
-    % Performance numbers
-    \node[align=left, font=\small] at (1, -1) {Peak: 192 B/cycle\\(with AVX)};
-    \node[align=left, font=\small] at (7.5, -1) {Bandwidth:\\16 B/cycle};
-
-    % Gap indicator
-    \draw[<->, red, very thick] (2, -2) -- (6, -2);
-    \node[below, red] at (4, -2) {\textbf{12x gap!}};
-\end{tikzpicture}
-\end{document}
-```
+- **ILP:** Keep the pipeline full, avoid stalls, help the branch predictor
+- **SIMD:** Process multiple data elements per instruction
 
 . . .
 
-**Problem:** CPU can consume data 12x faster than memory can deliver it.
+If every memory access took 1 cycle, we would be done.
 
-**Solution:** Memory hierarchy with caches.
+. . .
+
+**But it doesn't.** A main memory access costs ~200 cycles.
+
+The next question: **how do we keep the memory system from slowing us down?**
+
+# The Memory Wall
 
 ## Typical Memory Hierarchy
 
-| Level | Name | Size | Latency (cycles) | Bandwidth |
-|-------|------|------|-----------------|-----------|
-| L0 | Registers | ~1 KB | 0 | - |
-| L1 | L1 Cache | 32 KB | 4 | 12 doubles/cycle |
-| L2 | L2 Cache | 256 KB | 12 | 8 doubles/cycle |
-| L3 | L3 Cache | 8 MB | 42 | 4 doubles/cycle |
-| - | Main Memory | 64 GB | ~200 | 2 doubles/cycle |
-| - | SSD | 1 TB | ~10,000 | - |
+| Level | Name        | Size   | Latency (cycles) |
+| ----- | ----------- | ------ | ---------------- |
+| L0    | Registers   | ~1 KB  | 0                |
+| L1    | L1 Cache    | 32 KB  | ~4               |
+| L2    | L2 Cache    | 256 KB | ~12              |
+| L3    | L3 Cache    | 8 MB   | ~42              |
+| -     | Main Memory | 64 GB  | ~200             |
+| -     | SSD         | 1 TB   | ~10,000          |
 
 . . .
 
@@ -129,6 +110,8 @@ Row-major traversal has stride 1; column-major has stride N.
 
 ## Measuring the Impact
 
+\tiny
+
 ```bash
 $ cd examples && make locality
 ```
@@ -161,6 +144,7 @@ double sum_cols() {
 
 ## Run It Yourself
 
+\tiny
 ```cpp
 int main() {
     // Initialize
@@ -302,7 +286,7 @@ When a cache miss occurs, an entire **block** is loaded:
 
 **Block size:** 64 bytes = 8 doubles on modern CPUs
 
-Accessing `a[4]` loads `a[4]` through `a[11]` into cache.
+Accessing `a[4]` loads `a[0]` through `a[7]` into cache.
 
 ## Cache Organization: Direct Mapped
 
@@ -320,7 +304,7 @@ Accessing `a[4]` loads `a[4]` through `a[11]` into cache.
 
     % Cache sets
     \node at (-1, 1) {Cache:};
-    \foreach \i in {0,...,3} {
+    \foreach \i in {0,...,1} {
         \pgfmathtruncatemacro{\y}{1 - \i*0.6}
         \draw (0.5, \y-0.2) rectangle (1, \y+0.2);
         \node[font=\tiny] at (0.75, \y) {V};
@@ -373,7 +357,11 @@ Set index = (address / block_size) mod num_sets
 
 - E = 1: Direct mapped
 - E = S: Fully associative (any location)
-- Typical: L1 is 8-way, L2 is 4-way, L3 is 16-way
+- Typical: L1 is 8-way
+
+. . .
+
+**Why higher associativity helps:** With direct mapped, two addresses that map to the same set evict each other — even if the rest of the cache is empty. More ways per set = fewer conflict misses.
 
 ## The Three C's of Cache Misses
 
@@ -396,7 +384,7 @@ Set index = (address / block_size) mod num_sets
 - Cache has space, but blocks map to same set
 - Solution: Increase associativity, change data layout
 
-# Operational Intensity Revisited
+# Operational Intensity 
 
 ## Operational Intensity
 
@@ -407,13 +395,11 @@ $$I(n) = \frac{W(n)}{Q(n)}$$
 
 . . .
 
-| Operation | $W(n)$ | $Q(n)$ | $I(n)$ |
-|-----------|--------|--------|--------|
-| Vector sum: $y = x + y$ | $n$ | $24n$ | $O(1)$ |
-| Matrix-vector: $y = Ax$ | $2n^2$ | $8n^2$ | $O(1)$ |
-| FFT | $5n\log n$ | $8n$ | $O(\log n)$ |
-| Matrix-matrix: $C = AB$ | $2n^3$ | $8n^2$ | $O(n)$ |
-
+| Operation               | $W(n)$   | $Q(n)$   | $I(n)$ |
+| ----------------------- | -------- | -------- | ------ |
+| Vector sum: $y = x + y$ | $O(n)$   | $O(n)$   | $O(1)$ |
+| Matrix-vector: $y = Ax$ | $O(n^2)$ | $O(n^2)$ | $O(1)$ |
+| Matrix-matrix: $C = AB$ | $O(n^3)$ | $O(n^2)$ | $O(n)$ |
 ## Compute Bound vs Memory Bound
 
 **Memory bound:** Low operational intensity
@@ -432,63 +418,112 @@ $$I(n) = \frac{W(n)}{Q(n)}$$
 
 **Key insight:** MMM has $O(n)$ operational intensity -- we can hide memory latency with computation if we're clever about data reuse.
 
-## Impact on Performance
+# Blocking for Cache
+
+## Matrix Multiplication: Naive
+\tiny
+
+```cpp
+for (int i = 0; i < n; i++)
+    for (int j = 0; j < n; j++)
+        for (int k = 0; k < n; k++)
+            C[i][j] += A[i][k] * B[k][j];
+```
 
 ```tikz
 \begin{document}
-\begin{tikzpicture}[scale=0.8, transform shape]
-    % FFT plot (memory bound)
-    \node at (0, 3.5) {\textbf{FFT: I(n) = O(log n)}};
-    \draw[->] (0, 0) -- (4.5, 0) node[right] {n};
-    \draw[->] (0, 0) -- (0, 3) node[above] {Perf};
+\begin{tikzpicture}[scale=0.55, transform shape]
+    \def\sz{4}
+    % Matrix A
+    \draw (0, 0) rectangle (\sz, \sz);
+    \node at (\sz/2, -0.5) {A};
+    % Highlight row i
+    \draw[fill=red!30] (0, \sz-0.8) rectangle (\sz, \sz-0.2);
+    \node[left, font=\small] at (-0.1, \sz-0.5) {row $i$};
+    % Arrow along row
+    \draw[->, thick, red!70!black] (0.2, \sz-0.5) -- (\sz-0.2, \sz-0.5);
+    \node[above, font=\tiny, red!70!black] at (\sz/2, \sz-0.2) {stride 1 (good)};
 
-    % Performance curve with drop
-    \draw[thick, blue] (0.2, 2.5) -- (1.5, 2.5);
-    \draw[thick, blue] (1.5, 2.5) -- (2, 1.2);
-    \draw[thick, blue] (2, 1.2) -- (4, 1.2);
+    \node at (\sz+0.5, \sz/2) {$\times$};
 
-    % L3 boundary
-    \draw[dashed, red] (1.5, 0) -- (1.5, 3);
-    \node[below, font=\tiny, red] at (1.5, 0) {L3};
+    % Matrix B
+    \draw (\sz+1, 0) rectangle (2*\sz+1, \sz);
+    \node at (\sz+1+\sz/2, -0.5) {B};
+    % Highlight column j
+    \draw[fill=blue!30] (\sz+1.6, 0) rectangle (\sz+2.2, \sz);
+    \node[above, font=\small] at (\sz+1.9, \sz+0.1) {col $j$};
+    % Arrow along column
+    \draw[->, thick, blue!70!black] (\sz+1.9, \sz-0.2) -- (\sz+1.9, 0.2);
+    \node[right, font=\tiny, blue!70!black] at (\sz+2.3, \sz/2) {stride $n$ (bad)};
 
-    % MMM plot (compute bound)
-    \node at (7, 3.5) {\textbf{MMM: I(n) = O(n)}};
-    \draw[->] (6, 0) -- (10.5, 0) node[right] {n};
-    \draw[->] (6, 0) -- (6, 3) node[above] {Perf};
+    \node at (2*\sz+1.5, \sz/2) {$=$};
 
-    % Performance curve - maintains
-    \draw[thick, blue] (6.2, 2.5) -- (10, 2.5);
-
-    % L3 boundary
-    \draw[dashed, red] (7.5, 0) -- (7.5, 3);
-    \node[below, font=\tiny, red] at (7.5, 0) {L3};
+    % Matrix C
+    \draw (2*\sz+2, 0) rectangle (3*\sz+2, \sz);
+    \node at (2*\sz+2+\sz/2, -0.5) {C};
+    % Highlight single element
+    \draw[fill=green!40] (2*\sz+2.6, \sz-0.8) rectangle (2*\sz+3.2, \sz-0.2);
+    \node[font=\small] at (2*\sz+2.9, \sz-0.5) {$c_{ij}$};
 \end{tikzpicture}
 \end{document}
 ```
 
-MMM can maintain high performance even when data exceeds cache.
 
-# Blocking for Cache
+## Naive MMM: Cache Analysis
 
-## Matrix Multiplication: Naive
+```tikz
+\begin{document}
+\begin{tikzpicture}[scale=0.55, transform shape]
+    \def\sz{4}
+    % Matrix A
+    \draw (0, 0) rectangle (\sz, \sz);
+    \node at (\sz/2, -0.5) {A};
+    % Highlight row i
+    \draw[fill=red!30] (0, \sz-0.8) rectangle (\sz, \sz-0.2);
+    \node[left, font=\small] at (-0.1, \sz-0.5) {row $i$};
+    % Arrow along row
+    \draw[->, thick, red!70!black] (0.2, \sz-0.5) -- (\sz-0.2, \sz-0.5);
+    \node[above, font=\tiny, red!70!black] at (\sz/2, \sz-0.2) {stride 1 (good)};
 
-```cpp
-void mmm_naive(double* A, double* B, double* C, int n) {
-    for (int i = 0; i < n; i++)
-        for (int j = 0; j < n; j++)
-            for (int k = 0; k < n; k++)
-                C[i*n + j] += A[i*n + k] * B[k*n + j];
-}
+    \node at (\sz+0.5, \sz/2) {$\times$};
+
+    % Matrix B
+    \draw (\sz+1, 0) rectangle (2*\sz+1, \sz);
+    \node at (\sz+1+\sz/2, -0.5) {B};
+    % Highlight column j
+    \draw[fill=blue!30] (\sz+1.6, 0) rectangle (\sz+2.2, \sz);
+    \node[above, font=\small] at (\sz+1.9, \sz+0.1) {col $j$};
+    % Arrow along column
+    \draw[->, thick, blue!70!black] (\sz+1.9, \sz-0.2) -- (\sz+1.9, 0.2);
+    \node[right, font=\tiny, blue!70!black] at (\sz+2.3, \sz/2) {stride $n$ (bad)};
+
+    \node at (2*\sz+1.5, \sz/2) {$=$};
+
+    % Matrix C
+    \draw (2*\sz+2, 0) rectangle (3*\sz+2, \sz);
+    \node at (2*\sz+2+\sz/2, -0.5) {C};
+    % Highlight single element
+    \draw[fill=green!40] (2*\sz+2.6, \sz-0.8) rectangle (2*\sz+3.2, \sz-0.2);
+    \node[font=\small] at (2*\sz+2.9, \sz-0.5) {$c_{ij}$};
+\end{tikzpicture}
+\end{document}
 ```
 
-. . .
-
+\tiny
 **Cache analysis (assuming cache << matrix size):**
 
 - For each of $n^2$ output elements:
   - Read $n$ elements from row of A (n/8 misses)
   - Read $n$ elements from column of B (n misses - poor locality!)
 - Total: $\approx 9n^3/8$ cache misses
+
+. . .
+
+**Operational intensity (naive):**
+
+$$I = \frac{W}{Q} = \frac{2n^3}{(9n^3/8) \times 64} = \frac{2}{72} \approx \frac{1}{36}$$
+
+Only ~0.03 FLOPs per byte transferred -- **heavily memory bound!**
 
 ## The Blocking Idea
 
@@ -526,30 +561,76 @@ Instead of computing one element at a time, compute **blocks**:
 \end{document}
 ```
 
-**Goal:** Keep working set in cache to exploit temporal locality.
+**Goal:** Keep working set in cache to exploit locality.
 
 ## Blocked Matrix Multiplication
 
 ```cpp
-void mmm_blocked(double* A, double* B, double* C, int n, int b) {
-    for (int ii = 0; ii < n; ii += b)
-        for (int jj = 0; jj < n; jj += b)
-            for (int kk = 0; kk < n; kk += b)
-                // Multiply b x b blocks
-                for (int i = ii; i < ii + b; i++)
-                    for (int j = jj; j < jj + b; j++)
-                        for (int k = kk; k < kk + b; k++)
-                            C[i*n + j] += A[i*n + k] * B[k*n + j];
-}
+for (int ii = 0; ii < n; ii += b)
+    for (int jj = 0; jj < n; jj += b)
+        for (int kk = 0; kk < n; kk += b)
+            // Multiply b x b blocks
+            for (int i = ii; i < ii + b; i++)
+                for (int j = jj; j < jj + b; j++)
+                    for (int k = kk; k < kk + b; k++)
+                        C[i][j] += A[i][k] * B[k][j];
 ```
+
+## Blocked MMM: Cache Analysis
+
+
+```tikz
+\begin{document}
+\begin{tikzpicture}[scale=0.4, transform shape]
+    % Matrix A
+    \draw (0, 0) rectangle (4, 4);
+    \draw[fill=red!30] (0, 3) rectangle (1, 4);
+    \node at (2, -0.5) {A};
+    \node[font=\tiny] at (0.5, 3.5) {b x b};
+
+    \node at (4.5, 2) {$\times$};
+
+    % Matrix B
+    \draw (5, 0) rectangle (9, 4);
+    \draw[fill=blue!30] (5, 3) rectangle (6, 4);
+    \node at (7, -0.5) {B};
+
+    \node at (9.5, 2) {$=$};
+
+    % Matrix C
+    \draw (10, 0) rectangle (14, 4);
+    \draw[fill=green!30] (10, 3) rectangle (11, 4);
+    \node at (12, -0.5) {C};
+
+    % Block multiplication detail
+    \draw[->, thick] (7, -1) -- (7, -2);
+
+    \node at (7, -3) {Process n/b $\times$ n/b blocks};
+    \node at (7, -4) {Each block fits in cache};
+\end{tikzpicture}
+\end{document}
+```
+
+
+\tiny
+**Cache analysis with blocking:**
+- One block multiply: $b \times b$ block of A + $b \times b$ block of B + $b \times b$ block of C
+- If $3b^2 \leq \gamma$ (cache size in elements), all three blocks fit in cache
+- Loading one $b \times b$ block = $b^2/8$ misses (64-byte lines, 8 doubles each)
+- Three blocks = $3 \times b^2/8$ misses per block multiply
+- There are $(n/b)^3$ block multiplies in total
+- **Total misses:** $(n/b)^3 \times 3b^2/8 = 3n^3/(8b)$
+. . .
+
+**Speedup over naive (in cache misses):** $\frac{9n^3/8}{3n^3/(8b)} = 3b$
 
 . . .
 
-**Cache analysis with blocking:**
+**Operational intensity (blocked):**
 
-- Each block multiplication: $b^2/4$ misses (assuming $3b^2 \leq$ cache size)
-- Total: $(n/b)^3 \times b^2/4 = n^3/(4b)$ misses
-- **Speedup:** $\approx 2.6\sqrt{\gamma}$ where $\gamma$ = cache size
+$$I = \frac{W}{Q} = \frac{2n^3}{(3n^3/(8b)) \times 64} = \frac{b}{12} = O(b)$$
+
+With $b = 32$: $I \approx 2.7$ FLOPs/byte -- **~96x improvement over naive!**
 
 ## Choosing the Block Size
 
@@ -567,12 +648,9 @@ Use $b = 32$ (power of 2 for alignment).
 
 . . .
 
-**Operational intensity with blocking:**
-
-$$I(n) = \frac{2n^3}{n^3/(4b) \times 8} = O(b) = O(\sqrt{\gamma})$$
-
 ## Complete Blocking Example
 
+\tiny
 ```bash
 $ cd examples && make mmm
 ```
@@ -607,6 +685,7 @@ void mmm_blocked() {
 ```
 
 ## Run It Yourself
+\tiny
 
 ```cpp
 int main() {
@@ -631,69 +710,6 @@ int main() {
     cout << "Blocked: " << gflops / chrono::duration<double>(t4-t3).count()
          << " GFLOPS\n";
 }
-```
-
-# Measuring Cache Performance
-
-## Cache Misses with perf
-
-```bash
-$ cd examples && make perf_locality
-$ cd examples && make perf_mmm
-```
-
-. . .
-
-**Key metrics:**
-
-- L1 miss rate: L1-dcache-load-misses / L1-dcache-loads
-- LLC miss rate: LLC-load-misses / LLC-loads
-
-High LLC miss rate = memory bound.
-
-## Example: Comparing Access Patterns
-
-```bash
-$ perf stat -e L1-dcache-load-misses ./sum_rows
-  16,000,000 L1-dcache-load-misses    # 1 miss per 8 elements
-
-$ perf stat -e L1-dcache-load-misses ./sum_cols
- 128,000,000 L1-dcache-load-misses    # 1 miss per element
-```
-
-. . .
-
-Column-major access has **8x more cache misses** than row-major!
-
-(Exact numbers depend on array size and cache configuration)
-
-## Cache Miss Diagnosis Flowchart
-
-```tikz
-\begin{document}
-\begin{tikzpicture}[scale=0.7, transform shape,
-    box/.style={rectangle, draw, rounded corners, minimum width=2.5cm, minimum height=0.8cm, align=center, font=\small},
-    decision/.style={diamond, draw, aspect=2, minimum width=2cm, align=center, font=\small}]
-
-    \node[box, fill=blue!20] (start) at (0, 0) {High cache\\miss rate?};
-
-    \node[decision] (size) at (0, -2) {Working set\\$>$ cache?};
-
-    \node[box, fill=red!20] (capacity) at (-3, -4) {Capacity miss\\Block/tile data};
-
-    \node[decision] (stride) at (3, -4) {Stride $>$ 1?};
-
-    \node[box, fill=orange!20] (spatial) at (1.5, -6) {Poor spatial\\locality};
-
-    \node[box, fill=yellow!20] (conflict) at (4.5, -6) {Possible\\conflict miss};
-
-    \draw[->] (start) -- (size);
-    \draw[->] (size) -- node[left] {Yes} (capacity);
-    \draw[->] (size) -- node[right] {No} (stride);
-    \draw[->] (stride) -- node[left] {Yes} (spatial);
-    \draw[->] (stride) -- node[right] {Power of 2} (conflict);
-\end{tikzpicture}
-\end{document}
 ```
 
 # Conflict Misses and Power-of-2 Strides
@@ -805,6 +821,7 @@ where $\oplus$ is XOR and $\land$ is bitwise AND.
 
 **Key insight:** XOR with different row indices produces different results:
 
+\tiny
 | Row i | i AND 3 | 0 XOR (i AND 3) | Result |
 |-------|---------|-----------------|--------|
 | 0 | 0 | 0 XOR 0 | **0** |
@@ -827,6 +844,8 @@ double a[8][8];  // Row i maps to cache set (i % 4)
 . . .
 
 **Without swizzling:** All accesses go to column 0
+
+\tiny
 
 | Access | Location | Cache Set |
 |--------|----------|-----------|
@@ -907,6 +926,7 @@ To read "logical column 0", we access different physical columns:
 
 ## Swizzling Code: Read Column
 
+\tiny
 ```cpp
 // Reading "logical column c" from swizzled array
 double read_column_swizzled(double a[N][N], int c) {
@@ -921,6 +941,7 @@ double read_column_swizzled(double a[N][N], int c) {
 
 . . .
 
+\tiny
 **The data must be stored in swizzled layout:**
 
 ```cpp
@@ -1046,11 +1067,11 @@ double val = B[row][col ^ (row & 0x3)];
 The mask determines how many cache sets to distribute across:
 
 | Mask | Binary | Sets distributed |
-|------|--------|------------------|
-| 0x1 | 001 | 2 sets |
-| 0x3 | 011 | 4 sets |
-| 0x7 | 111 | 8 sets |
-| 0xF | 1111 | 16 sets |
+| ---- | ------ | ---------------- |
+| 0x1  | 001    | 2 sets           |
+| 0x3  | 011    | 4 sets           |
+| 0x7  | 111    | 8 sets           |
+| 0xF  | 1111   | 16 sets          |
 
 . . .
 
@@ -1061,16 +1082,7 @@ The mask determines how many cache sets to distribute across:
 int j_swizzled = j ^ (i & 0x7);
 ```
 
-## When to Use Each Solution
-
-| Solution | Pros | Cons |
-|----------|------|------|
-| **Padding** | Simple, no code changes | Wastes memory |
-| **Non-power-of-2** | Simple | May not be possible |
-| **Blocking** | General purpose | Complex code |
-| **Swizzling** | No memory waste | Complex indexing |
-
-. . .
+## Swizzling is especially important in GPU programming
 
 **Swizzling is especially important in GPU programming:**
 
@@ -1170,10 +1182,3 @@ $ cd examples && make perf
 - Power-of-2 array dimensions when accessing columns
 - Random access patterns when sequential is possible
 
-## Coming Up
-
-Next lectures will apply these concepts:
-
-- **GEMM optimization:** Combining ILP + SIMD + Blocking
-- **Database systems:** Buffer management and I/O optimization
-- **GPU memory hierarchy:** Different tradeoffs, same principles
